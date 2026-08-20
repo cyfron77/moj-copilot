@@ -230,4 +230,239 @@ else:
 # --- GŁÓWNY PANEL GÓRNY ---
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Ticker", ticker)
-c2.metric("Kurs",
+c2.metric("Kurs", f"{ostatnia_cena:.2f}", f"{zmiana_proc:+.2f}%")
+c3.metric("RSI (14)", f"{ostatni_rsi:.1f}", rsi_opis)
+c4.metric("MACD Status", f"{ostatni_macd:.2f}", macd_opis)
+c5.metric("Zmienność ATR (14)", f"{ostatni_atr:.2f}", "Średni zasięg świecy")
+
+komunikat_werdyktu = f"🎯 **WERDYKT AI COPILOTA: {werdykt_status}**\n\n- {trend_opis} | {rsi_opis} | {macd_opis} | Sentyment: {sent_opis}\n- *{werdykt_komentarz}*"
+if werdykt_kolor == "success":
+    st.success(komunikat_werdyktu)
+elif werdykt_kolor == "error":
+    st.error(komunikat_werdyktu)
+else:
+    st.info(komunikat_werdyktu)
+
+# --- ZAKŁADKI GŁÓWNE ---
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📈 Zaawansowany Wykres (Wstęgi + MACD)", 
+    "🤖 Analiza Sentymentu (AI)", 
+    "⚖️ Kalkulator Pozycji & ATR",
+    "🔍 Skaner Rynku (GPW & USA)",
+    "📓 Dziennik Transakcji"
+])
+
+with tab1:
+    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.7, 0.3])
+    
+    fig.add_trace(go.Candlestick(
+        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        name="Świece"
+    ), row=1, col=1)
+    
+    fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.2), name="SMA 20"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='deepskyblue', width=1.5), name="SMA 50"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], line=dict(color='gray', width=1, dash='dot'), name="Górna Wstęga"), row=1, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], line=dict(color='gray', width=1, dash='dot'), name="Dolna Wstęga"), row=1, col=1)
+    
+    colors_hist = ['green' if val >= 0 else 'red' for val in df['MACD_Hist']]
+    fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name="MACD Hist", marker_color=colors_hist), row=2, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='cyan', width=1.5), name="MACD"), row=2, col=1)
+    fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='yellow', width=1.2), name="Sygnał MACD"), row=2, col=1)
+    
+    fig.update_layout(
+        title=f"Analiza techniczna: {ticker}",
+        xaxis_rangeslider_visible=False,
+        height=620,
+        template="plotly_dark",
+        margin=dict(l=20, r=20, t=40, b=20)
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+with tab2:
+    st.subheader("📰 Świeże wiadomości rynkowe (Real-Time)")
+    if news_items:
+        for item in news_items:
+            st.markdown(f"**[{item['tytul']}]({item['link']})**")
+            st.caption(f"Sentyment: {item['status']} (`{item['score']:.2f}`) | Źródło: **{item['zrodlo']}** | Opublikowano: **{item['data']}**")
+            st.write("---")
+    else:
+        st.warning("Brak najnowszych wiadomości dla tego aktywa z ostatnich dni.")
+
+with tab3:
+    st.subheader("⚖️ Inteligentny Kalkulator Pozycji i Ryzyka (Zmienność ATR)")
+    st.caption("Kalkulator automatycznie dopasowuje odległość Stop Lossa do rzeczywistej dynamiki rynku (ATR).")
+    
+    mnoznik_atr = st.slider("Mnożnik ATR dla Stop Lossa (Zalecane: 1.5x - 2.5x):", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+    sugerowany_sl_long = float(round(ostatnia_cena - (ostatni_atr * mnoznik_atr), 2))
+    sugerowany_tp_long = float(round(ostatnia_cena + (ostatni_atr * mnoznik_atr * 2.0), 2))
+    
+    c_sl, c_tp = st.columns(2)
+    with c_sl:
+        stop_loss = st.number_input("Poziom Stop Loss (SL):", value=sugerowany_sl_long)
+    with c_tp:
+        take_profit = st.number_input("Poziom Take Profit (TP):", value=sugerowany_tp_long)
+    
+    roznica_sl = abs(ostatnia_cena - stop_loss)
+    if roznica_sl > 0:
+        max_strata_kwota = kapital * (ryzyko_proc / 100)
+        rekomendowana_liczba = int(max_strata_kwota / roznica_sl)
+        wartosc_pozycji = rekomendowana_liczba * ostatnia_cena
+        r_r = abs(take_profit - ostatnia_cena) / roznica_sl
+        
+        st.success(
+            f"🎯 Parametry zlecenia w XTB:\n\n"
+            f"- Zalecana wielkość pozycji: **{rekomendowana_liczba}** sztuk / kontraktów\n"
+            f"- Łączna wartość transakcji: **{wartosc_pozycji:,.2f}** PLN / USD\n"
+            f"- Ryzyko kapitałowe (Max strata): **{max_strata_kwota:,.2f}** ({ryzyko_proc}%)\n"
+            f"- Stosunek Zysku do Ryzyka (Risk/Reward): **1 : {r_r:.2f}**\n"
+            f"- Bieżąca zmienność ATR (14): **{ostatni_atr:.2f}**"
+        )
+    else:
+        st.warning("Stop Loss nie może być równy bieżącej cenie.")
+
+with tab4:
+    st.subheader("🔍 Skaner Okazji Rynkowych (Szybki przegląd rynku)")
+    
+    if st.button("🚀 Uruchom skanowanie rynku"):
+        with st.spinner("Skanowanie w toku..."):
+            wyniki_skanera = []
+            for nazwa, dane_aktyw in popularne_aktywa.items():
+                sym = dane_aktyw["ticker"]
+                d_skan = pobierz_dane(sym, "3mo", "1d")
+                if d_skan is not None and not d_skan.empty:
+                    cena = float(d_skan['Close'].iloc[-1])
+                    rsi_val = float(d_skan['RSI'].iloc[-1]) if not pd.isna(d_skan['RSI'].iloc[-1]) else 50.0
+                    sma50_val = float(d_skan['SMA50'].iloc[-1]) if not pd.isna(d_skan['SMA50'].iloc[-1]) else cena
+                    atr_val = float(d_skan['ATR'].iloc[-1]) if not pd.isna(d_skan['ATR'].iloc[-1]) else 0.0
+                    trend = "🟢 Wzrostowy" if cena > sma50_val else "🔴 Spadkowy"
+                    
+                    if rsi_val < 35:
+                        stan_rsi = "🔥 Wyprzedanie (<35)"
+                    elif rsi_val > 70:
+                        stan_rsi = "⚠️ Wykupienie (>70)"
+                    else:
+                        stan_rsi = "Neutralne"
+                        
+                    wyniki_skanera.append({
+                        "Aktywo": nazwa,
+                        "Ticker": sym,
+                        "Cena": f"{cena:.2f}",
+                        "RSI (14)": f"{rsi_val:.1f}",
+                        "Stan RSI": stan_rsi,
+                        "ATR": f"{atr_val:.2f}",
+                        "Trend (SMA50)": trend
+                    })
+            
+            df_skaner = pd.DataFrame(wyniki_skanera)
+            st.dataframe(df_skaner, use_container_width=True)
+
+with tab5:
+    st.subheader("📓 Dziennik Transakcji (Trading Journal)")
+    st.caption("Notuj swoje wejścia na rynek lub skorzystaj z szybkiego wklejania z XTB.")
+    
+    with st.expander("⚡ Szybkie wklejanie z XTB (Kopiuj-Wklej)", expanded=True):
+        st.info("Wklej tutaj tekst skopiowany z historii platformy XTB (np. szczegóły zamkniętej pozycji), a system uzupełni dane automatycznie.")
+        surowy_tekst = st.text_area("Wklej dane transakcji z XTB:")
+        
+        if st.button("✨ Przetwórz i dodaj automatycznie"):
+            if surowy_tekst:
+                try:
+                    znalezione_liczby = re.findall(r"[-+]?\d*\.\d+|\d+", surowy_tekst)
+                    slowa = surowy_tekst.split()
+                    wyciagniety_symbol = ticker 
+                    for s in slowa:
+                        if s.isupper() and len(s) >= 3 and len(s) <= 8:
+                            wyciagniety_symbol = s
+                            break
+                             
+                    pnl_wykryte = float(znalezione_liczby[-1]) if znalezione_liczby else 0.0
+                    
+                    nowy_wpis = {
+                        "Data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "Aktywo": wyciagniety_symbol,
+                        "Kierunek": "KUPNO (Long)",
+                        "Wolumen": 1.0,
+                        "Cena Otwarcia": ostatnia_cena,
+                        "Status": "Zamknięte",
+                        "Wynik (PLN)": pnl_wykryte
+                    }
+                    zapisz_w_dzienniku(nowy_wpis)
+                    st.success(f"✅ Pomyślnie dodano transakcję! Wykryty wynik (PnL): {pnl_wykryte}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Nie udało się automatycznie przetworzyć tekstu. Użyj standardowego formularza poniżej. Błąd: {e}")
+            else:
+                st.warning("Najpierw wklej tekst w pole powyżej.")
+
+    with st.expander("➕ Dodaj nową transakcję ręcznie", expanded=False):
+        with st.form("nowa_transakcja_form"):
+            c_f1, c_f2, c_f3 = st.columns(3)
+            t_aktywo = c_f1.text_input("Ticker / Aktywo:", value=ticker)
+            t_kierunek = c_f2.selectbox("Kierunek:", ["KUPNO (Long)", "SPRZEDAŻ (Short)"])
+            t_wolumen = c_f3.number_input("Wolumen / Sztuki:", min_value=0.01, value=1.0, step=0.1)
+            
+            c_f4, c_f5, c_f6 = st.columns(3)
+            t_cena = c_f4.number_input("Cena Otwarcia:", value=ostatnia_cena, format="%.4f")
+            t_status = c_f5.selectbox("Status:", ["Otwarte", "Zamknięte"])
+            t_pnl = c_f6.number_input("Wynik netto (bazowa waluta konta):", value=0.0, format="%.2f")
+            
+            submit_trade = st.form_submit_button("Zapisz w dzienniku")
+            
+            if submit_trade:
+                nowy_wpis = {
+                    "Data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "Aktywo": t_aktywo.upper(),
+                    "Kierunek": t_kierunek,
+                    "Wolumen": t_wolumen,
+                    "Cena Otwarcia": t_cena,
+                    "Status": t_status,
+                    "Wynik (PLN)": t_pnl
+                }
+                zapisz_w_dzienniku(nowy_wpis)
+                st.success("✅ Dodano nową transakcję do dziennika!")
+                st.rerun()
+                
+    st.markdown("---")
+    st.markdown("### 📊 Zaawansowane Statystyki i Krzywa Kapitału")
+    df_dziennik = wczytaj_dziennik()
+    
+    if not df_dziennik.empty:
+        zamkniete = df_dziennik[df_dziennik['Status'] == 'Zamknięte'].copy()
+        
+        if not zamkniete.empty:
+            zamkniete['Wynik (PLN)'] = pd.to_numeric(zamkniete['Wynik (PLN)'], errors='coerce')
+            
+            total_trades = len(zamkniete)
+            zyskownych = len(zamkniete[zamkniete['Wynik (PLN)'] > 0])
+            stratnych = len(zamkniete[zamkniete['Wynik (PLN)'] <= 0])
+            win_rate = (zyskownych / total_trades) * 100 if total_trades > 0 else 0
+            suma_wynikow = zamkniete['Wynik (PLN)'].sum()
+            
+            c_s1, c_s2, c_s3, c_s4 = st.columns(4)
+            c_s1.metric("Zamknięte pozycje", total_trades)
+            c_s2.metric("Skuteczność (Win Rate)", f"{win_rate:.1f}%")
+            c_s3.metric("Zysk / Strata", f"{zyskownych} / {stratnych}")
+            c_s4.metric("Całkowity Wynik (PnL)", f"{suma_wynikow:.2f} PLN")
+            
+            zamkniete['Krzywa Kapitału'] = zamkniete['Wynik (PLN)'].cumsum()
+            fig_eq = go.Figure()
+            fig_eq.add_trace(go.Scatter(
+                x=zamkniete['Data'], 
+                y=zamkniete['Krzywa Kapitału'], 
+                mode='lines+markers', 
+                name='Krzywa PnL', 
+                line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)
+            ))
+            fig_eq.update_layout(
+                title="Krzywa Zysków i Strat", 
+                template="plotly_dark", 
+                height=350,
+                margin=dict(l=20, r=20, t=40, b=20)
+            )
+            st.plotly_chart(fig_eq, use_container_width=True)
+            
+        st.markdown("### 📝 Pełna historia operacji")
+        st.dataframe(df_dziennik, use_container_width=True)
+    else:
+        st.info("Twój dziennik jest na razie pusty. Użyj szybkiego wklejania powyżej, aby dodać pierwsze zagranie.")
