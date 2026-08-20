@@ -8,6 +8,7 @@ import feedparser
 from textblob import TextBlob
 from datetime import datetime
 import os
+import re
 
 # Konfiguracja strony
 st.set_page_config(page_title="AI Trading Copilot Pro", layout="wide", page_icon="📈")
@@ -61,7 +62,6 @@ else:
 okres = st.sidebar.selectbox("Zakres czasu:", ["1mo", "3mo", "6mo", "1y", "2y"], index=2)
 interwal = st.sidebar.selectbox("Interwał:", ["1d", "1wk"], index=0)
 
-# Ustawienia kalkulatora ryzyka
 st.sidebar.markdown("---")
 st.sidebar.header("⚖️ Kalkulator Wielkości Pozycji (XTB)")
 kapital = st.sidebar.number_input("Twój kapitał (PLN / USD):", min_value=100.0, value=10000.0, step=500.0)
@@ -359,9 +359,48 @@ with tab4:
 
 with tab5:
     st.subheader("📓 Dziennik Transakcji (Trading Journal)")
-    st.caption("Notuj swoje wejścia na rynek, aby budować statystykę zysków i strat.")
+    st.caption("Notuj swoje wejścia na rynek lub skorzystaj z szybkiego wklejania z XTB.")
     
-    with st.expander("➕ Dodaj nową transakcję", expanded=False):
+    # --- MODUŁ SZYBKIEGO WKLEJANIA Z XTB ---
+    with st.expander("⚡ Szybkie wklejanie z XTB (Kopiuj-Wklej)", expanded=True):
+        st.info("Wklej tutaj tekst skopiowany z historii platformy XTB (np. szczegóły zamkniętej pozycji), a system uzupełni dane automatycznie.")
+        surowy_tekst = st.text_area("Wklej dane transakcji z XTB:")
+        
+        if st.button("✨ Przetwórz i dodaj automatycznie"):
+            if surowy_tekst:
+                try:
+                    # Próba wyciągnięcia liczb z tekstu (szukamy m.in. zysku/straty, ceny itp.)
+                    # Szukamy liczb ze znakiem lub bez (np. 150.50, -45.00)
+                    znalezione_liczby = re.findall(r"[-+]?\d*\.\d+|\d+", surowy_tekst)
+                    
+                    # Próba wyciągnięcia tickera/symbolu (np. złote litery, AAPL, GOLD, EURUSD itp.)
+                     slowa = surowy_tekst.split()
+                     wyciagniety_symbol = ticker # domyślnie aktualnie wybrany w panelu
+                     for s in slowa:
+                         if s.isupper() and len(s) >= 3 and len(s) <= 8:
+                             wyciagniety_symbol = s
+                             break
+                             
+                    pnl_wykryte = float(znalezione_liczby[-1]) if znalezione_liczby else 0.0
+                    
+                    nowy_wpis = {
+                        "Data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "Aktywo": wyciagniety_symbol,
+                        "Kierunek": "KUPNO (Long)",
+                        "Wolumen": 1.0,
+                        "Cena Otwarcia": ostatnia_cena,
+                        "Status": "Zamknięte",
+                        "Wynik (PLN)": pnl_wykryte
+                    }
+                    zapisz_w_dzienniku(nowy_wpis)
+                    st.success(f"✅ Pomyślnie dodano transakcję! Wykryty wynik (PnL): {pnl_wykryte}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Nie udało się automatycznie przetworzyć tekstu. Użyj standardowego formularza poniżej. Błąd: {e}")
+            else:
+                st.warning("Najpierw wklej tekst w pole powyżej.")
+
+    with st.expander("➕ Dodaj nową transakcję ręcznie", expanded=False):
         with st.form("nowa_transakcja_form"):
             c_f1, c_f2, c_f3 = st.columns(3)
             t_aktywo = c_f1.text_input("Ticker / Aktywo:", value=ticker)
@@ -387,6 +426,7 @@ with tab5:
                 }
                 zapisz_w_dzienniku(nowy_wpis)
                 st.success("✅ Dodano nową transakcję do dziennika!")
+                st.rerun()
                 
     st.markdown("---")
     st.markdown("### 📊 Zaawansowane Statystyki i Krzywa Kapitału")
@@ -398,7 +438,6 @@ with tab5:
         if not zamkniete.empty:
             zamkniete['Wynik (PLN)'] = pd.to_numeric(zamkniete['Wynik (PLN)'], errors='coerce')
             
-            # Obliczenia statystyk
             total_trades = len(zamkniete)
             zyskownych = len(zamkniete[zamkniete['Wynik (PLN)'] > 0])
             stratnych = len(zamkniete[zamkniete['Wynik (PLN)'] <= 0])
@@ -408,10 +447,9 @@ with tab5:
             c_s1, c_s2, c_s3, c_s4 = st.columns(4)
             c_s1.metric("Zamknięte pozycje", total_trades)
             c_s2.metric("Skuteczność (Win Rate)", f"{win_rate:.1f}%")
-            c_s3.metric("Zyskowne / Stratne", f"{zyskownych} / {stratnych}")
+            c_s3.metric("Zysk / Strata", f"{zyskownych} / {stratnych}")
             c_s4.metric("Całkowity Wynik (PnL)", f"{suma_wynikow:.2f} PLN")
             
-            # Wykres krzywej kapitału
             zamkniete['Krzywa Kapitału'] = zamkniete['Wynik (PLN)'].cumsum()
             fig_eq = go.Figure()
             fig_eq.add_trace(go.Scatter(
@@ -428,3 +466,6 @@ with tab5:
                 margin=dict(l=20, r=20, t=40, b=20)
             )
             st.plotly_chart(fig_eq, use_container_width=True)
+            
+        st.markdown("### 📝 Pełna historia operacji")
+        st.dataframe(df_dziennik,
