@@ -8,6 +8,7 @@ import feedparser
 from textblob import TextBlob
 from datetime import datetime
 import os
+import json
 
 # Konfiguracja strony
 st.set_page_config(page_title="AI Trading Copilot Pro", layout="wide", page_icon="📈")
@@ -15,21 +16,18 @@ st.set_page_config(page_title="AI Trading Copilot Pro", layout="wide", page_icon
 st.title("🤖 AI Trading & Investment Copilot")
 st.caption("Wsparcie decyzji inwestycyjnych: Wall Street, GPW, Surowce, CFD (XTB)")
 
-# --- BAZA ULUBIONYCH AKTYWÓW (Wyszukuj pisząc nazwę w liście lub wpisz własny) ---
-popularne_aktywa = {
-    # --- SUROWCE I KONTRAKTY ---
+# --- DYNAMICZNA BAZA AKTYWÓW Z ZAPISEM W PLIKU JSON ---
+PLIK_BAZY_AKTYWOW = "baza_aktywow.json"
+
+domyslne_aktywa = {
     "🟡 Złoto (GC=F)": {"ticker": "GC=F", "search_term": "Gold price commodity market"},
     "🛢️ Ropa WTI (CL=F)": {"ticker": "CL=F", "search_term": "Crude oil price energy market"},
     "🛢️ Ropa Brent (BZ=F)": {"ticker": "BZ=F", "search_term": "Brent oil price energy market"},
     "⚪ Srebro (SI=F)": {"ticker": "SI=F", "search_term": "Silver price commodity market"},
     "⛽ Gaz Ziemny (NG=F)": {"ticker": "NG=F", "search_term": "Natural gas price energy"},
-    
-    # --- KRYPTOWALUTY ---
     "₿ Bitcoin (BTC-USD)": {"ticker": "BTC-USD", "search_term": "Bitcoin crypto market news"},
     "Ξ Ethereum (ETH-USD)": {"ticker": "ETH-USD", "search_term": "Ethereum crypto news"},
     "🪙 Solana (SOL-USD)": {"ticker": "SOL-USD", "search_term": "Solana crypto news"},
-    
-    # --- GIEŁDA USA (WALL STREET) ---
     "💻 NVIDIA (NVDA)": {"ticker": "NVDA", "search_term": "NVIDIA stock news"},
     "🍏 Apple (AAPL)": {"ticker": "AAPL", "search_term": "Apple stock market news"},
     "🪟 Microsoft (MSFT)": {"ticker": "MSFT", "search_term": "Microsoft stock news"},
@@ -37,13 +35,9 @@ popularne_aktywa = {
     "📦 Amazon (AMZN)": {"ticker": "AMZN", "search_term": "Amazon stock market news"},
     "🌐 Google / Alphabet (GOOGL)": {"ticker": "GOOGL", "search_term": "Google stock market news"},
     "🥤 Coca-Cola (KO)": {"ticker": "KO", "search_term": "Coca Cola stock news"},
-    
-    # --- INDEKSY I ETF-Y ---
     "🇺🇸 S&P 500 ETF (SPY)": {"ticker": "SPY", "search_term": "S&P 500 index market today"},
     "🚀 Nasdaq 100 ETF (QQQ)": {"ticker": "QQQ", "search_term": "Nasdaq 100 ETF market"},
     "🌍 Vanguard All-World ETF (VWCE.DE)": {"ticker": "VWCE.DE", "search_term": "VWCE ETF market news"},
-    
-    # --- GIEŁDA PAPIERÓW WARTOŚCIOWYCH W WARSZAWIE (GPW) ---
     "🎮 CD Projekt (CDR.WA)": {"ticker": "CDR.WA", "search_term": "CD Projekt gielda akcje"},
     "⛽ Orlen (PKN.WA)": {"ticker": "PKN.WA", "search_term": "PKN Orlen gielda GPW"},
     "🏦 PKO BP (PKO.WA)": {"ticker": "PKO.WA", "search_term": "PKO BP bank gielda GPW"},
@@ -54,6 +48,21 @@ popularne_aktywa = {
     "🏦 Bank Pekao (PEO.WA)": {"ticker": "PEO.WA", "search_term": "Bank Pekao gielda GPW"},
     "🏗️ JSW (JSW.WA)": {"ticker": "JSW.WA", "search_term": "JSW gielda wegiel"}
 }
+
+def wczytaj_baze_aktywow():
+    if os.path.exists(PLIK_BAZY_AKTYWOW):
+        try:
+            with open(PLIK_BAZY_AKTYWOW, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except:
+            pass
+    return domyslne_aktywa
+
+def zapisz_baze_aktywow(baza):
+    with open(PLIK_BAZY_AKTYWOW, "w", encoding="utf-8") as f:
+        json.dump(baza, f, ensure_ascii=False, indent=4)
+
+popularne_aktywa = wczytaj_baze_aktywow()
 
 # --- FUNKCJE DZIENNIKA TRANSAKCJI ---
 PLIK_DZIENNIKA = "dziennik_transakcji.csv"
@@ -73,16 +82,42 @@ def zapisz_w_dzienniku(nowy_wpis):
 
 # --- PANEL BOCZNY (Sidebar) ---
 st.sidebar.header("⚙️ Ustawienia analizy")
-st.sidebar.caption("💡 Wskazówka: Kliknij poniższą listę i zacznij pisać nazwę (np. 'Złoto', 'Orlen', 'NVIDIA'), aby szybko wyszukać!")
+st.sidebar.caption("💡 Wpisz dowolny fragment nazwy lub tickera w poniższe pole, aby błyskawicznie przefiltrować listę!")
 
-wybor_predefiniowany = st.sidebar.selectbox("⭐ Wybierz z ulubionych:", ["Wpisz własny ticker..."] + list(popularne_aktywa.keys()))
+wybor_predefiniowany = st.sidebar.selectbox("⭐ Wybierz aktywo:", list(popularne_aktywa.keys()))
 
-if wybor_predefiniowany == "Wpisz własny ticker...":
-    ticker = st.sidebar.text_input("Wpisz Ticker ręcznie (np. TSLA, KGH.WA, GC=F):", value="GC=F").upper()
-    search_query = ticker.replace(".WA", "") + " stock market news"
-else:
-    ticker = popularne_aktywa[wybor_predefiniowany]["ticker"]
-    search_query = popularne_aktywa[wybor_predefiniowany]["search_term"]
+ticker = popularne_aktywa[wybor_predefiniowany]["ticker"]
+search_query = popularne_aktywa[wybor_predefiniowany]["search_term"]
+
+# --- MODUŁ ZARZĄDZANIA BAZĄ Z POZIOMU APLIKACJI ---
+with st.sidebar.expander("🛠️ Edytor listy walorów"):
+    st.markdown("**Dodaj nowy walor:**")
+    nowa_nazwa = st.text_input("Nazwa (np. 🍿 Netflix):", key="add_name")
+    nowy_ticker = st.text_input("Ticker (np. NFLX):", key="add_ticker")
+    if st.button("➕ Dodaj do listy"):
+        if nowa_nazwa and nowy_ticker:
+            t_Clean = nowy_ticker.upper().strip()
+            popularne_aktywa[nowa_nazwa] = {
+                "ticker": t_Clean,
+                "search_term": f"{t_Clean} stock market news"
+            }
+            zapisz_baze_aktywow(popularne_aktywa)
+            st.success(f"Dodano: {nowy_nazwa}")
+            st.rerun()
+        else:
+            st.error("Uzupełnij nazwę i ticker.")
+            
+    st.markdown("---")
+    st.markdown("**Usuń walor z listy:**")
+    walor_do_usuniecia = st.selectbox("Wybierz do usunięcia:", list(popularne_aktywa.keys()), key="del_select")
+    if st.button("🗑️ Usuń walor"):
+        if len(popularne_aktywa) > 1:
+            del popularne_aktywa[walor_do_usuniecia]
+            zapisz_baze_aktywow(popularne_aktywa)
+            st.success(f"Usunięto: {walor_do_usuniecia}")
+            st.rerun()
+        else:
+            st.warning("Lista nie może być pusta.")
 
 okres = st.sidebar.selectbox("Zakres czasu wykresu:", ["1mo", "3mo", "6mo", "1y", "2y"], index=2)
 interwal = st.sidebar.selectbox("Interwał świec:", ["1d", "1wk"], index=0)
@@ -133,7 +168,7 @@ def pobierz_dane(symbol, period, interval):
 df = pobierz_dane(ticker, okres, interwal)
 
 if df is None or df.empty:
-    st.error(f"Nie udało się pobrać danych dla symbolu: **{ticker}**. Sprawdź poprawność tickera.")
+    st.error(f"Nie udało się pobrać danych dla symbolu: **{ticker}**. Sprawdź poprawność tickera lub usuń ten walor.")
     st.stop()
 
 ostatnia_cena = float(df['Close'].iloc[-1])
@@ -445,15 +480,4 @@ with tab5:
                 name='Krzywa PnL', 
                 line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)
             ))
-            fig_eq.update_layout(
-                title="Krzywa Zysków i Strat", 
-                template="plotly_dark", 
-                height=350,
-                margin=dict(l=20, r=20, t=40, b=20)
-            )
-            st.plotly_chart(fig_eq, use_container_width=True)
-            
-        st.markdown("### 📝 Pełna historia operacji")
-        st.dataframe(df_dziennik, use_container_width=True)
-    else:
-        st.info("Twój dziennik jest na razie pusty. Użyj formularza powyżej, aby dodać pierwsze zagranie.")
+            fig_eq.update_layout
