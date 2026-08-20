@@ -230,46 +230,4 @@ else:
 # --- GŁÓWNY PANEL GÓRNY ---
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Ticker", ticker)
-c2.metric("Kurs", f"{ostatnia_cena:.2f}", f"{zmiana_proc:+.2f}%")
-c3.metric("RSI (14)", f"{ostatni_rsi:.1f}", rsi_opis)
-c4.metric("MACD Status", f"{ostatni_macd:.2f}", macd_opis)
-c5.metric("Zmienność ATR (14)", f"{ostatni_atr:.2f}", "Średni zasięg świecy")
-
-komunikat_werdyktu = f"🎯 **WERDYKT AI COPILOTA: {werdykt_status}**\n\n- {trend_opis} | {rsi_opis} | {macd_opis} | Sentyment: {sent_opis}\n- *{werdykt_komentarz}*"
-if werdykt_kolor == "success":
-    st.success(komunikat_werdyktu)
-elif werdykt_kolor == "error":
-    st.error(komunikat_werdyktu)
-else:
-    st.info(komunikat_werdyktu)
-
-# --- ZAKŁADKI GŁÓWNE ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
-    "📈 Zaawansowany Wykres (Wstęgi + MACD)", 
-    "🤖 Analiza Sentymentu (AI)", 
-    "⚖️ Kalkulator Pozycji & ATR",
-    "🔍 Skaner Rynku (GPW & USA)",
-    "📓 Dziennik Transakcji"
-])
-
-with tab1:
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.7, 0.3])
-    
-    fig.add_trace(go.Candlestick(
-        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-        name="Świece"
-    ), row=1, col=1)
-    
-    fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.2), name="SMA 20"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='deepskyblue', width=1.5), name="SMA 50"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], line=dict(color='gray', width=1, dash='dot'), name="Górna Wstęga"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], line=dict(color='gray', width=1, dash='dot'), name="Dolna Wstęga"), row=1, col=1)
-    
-    colors_hist = ['green' if val >= 0 else 'red' for val in df['MACD_Hist']]
-    fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name="MACD Hist", marker_color=colors_hist), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='cyan', width=1.5), name="MACD"), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='yellow', width=1.2), name="Sygnał MACD"), row=2, col=1)
-    
-    fig.update_layout(
-        title=f"Analiza techniczna: {ticker}",
-        xaxis_rangeslider_
+c2.metric("Kurs",
