@@ -80,14 +80,27 @@ def zapisz_w_dzienniku(nowy_wpis):
     df = pd.concat([df, pd.DataFrame([nowy_wpis])], ignore_index=True)
     df.to_csv(PLIK_DZIENNIKA, index=False)
 
-# --- PANEL BOCZNY (Sidebar) ---
+# --- PANEL BOCZNY (Sidebar) - INTELIGENTNA WYSZUKIWARKA ---
 st.sidebar.header("⚙️ Ustawienia analizy")
-st.sidebar.caption("💡 Wpisz dowolny fragment nazwy lub tickera w poniższe pole, aby błyskawicznie przefiltrować listę!")
 
-wybor_predefiniowany = st.sidebar.selectbox("⭐ Wybierz aktywo:", list(popularne_aktywa.keys()))
+# 1. Wyszukiwanie po fragmencie nazwy
+fraza_szukania = st.sidebar.text_input("🔍 Wyszukaj po nazwie (np. 'ropa', 'bank', 'apple'):", value="")
 
-ticker = popularne_aktywa[wybor_predefiniowany]["ticker"]
-search_query = popularne_aktywa[wybor_predefiniowany]["search_term"]
+# Filtrowanie bazy według wpisanej frazy (wielkość liter nie ma znaczenia)
+if fraza_szukania.strip():
+        pasujace_aktywa = {k: v for k, v in popularne_aktywa.items() if fraza_szukania.lower() in k.lower()}
+else:
+        pasujace_aktywa = popularne_aktywa
+
+if len(pasujace_aktywa) > 0:
+    wybor_predefiniowany = st.sidebar.selectbox("⭐ Wybierz z pasujących:", list(pasujace_aktywa.keys()))
+    ticker = pasujace_aktywa[wybor_predefiniowany]["ticker"]
+    search_query = pasujace_aktywa[wybor_predefiniowany]["search_term"]
+else:
+    st.sidebar.warning("Brak dopasowań. Sprawdź pisownię lub dodaj walor w edytorze poniżej.")
+    wybor_predefiniowany = list(popularne_aktywa.keys())[0]
+    ticker = popularne_aktywa[wybor_predefiniowany]["ticker"]
+    search_query = popularne_aktywa[wybor_predefiniowany]["search_term"]
 
 # --- MODUŁ ZARZĄDZANIA BAZĄ Z POZIOMU APLIKACJI ---
 with st.sidebar.expander("🛠️ Edytor listy walorów"):
@@ -102,7 +115,7 @@ with st.sidebar.expander("🛠️ Edytor listy walorów"):
                 "search_term": f"{t_Clean} stock market news"
             }
             zapisz_baze_aktywow(popularne_aktywa)
-            st.success(f"Dodano: {nowy_nazwa}")
+            st.success(f"Dodano: {nowa_nazwa}")
             st.rerun()
         else:
             st.error("Uzupełnij nazwę i ticker.")
@@ -480,4 +493,15 @@ with tab5:
                 name='Krzywa PnL', 
                 line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)
             ))
-            fig_eq.update_layout
+            fig_eq.update_layout(
+                title="Krzywa Zysków i Strat", 
+                template="plotly_dark", 
+                height=350,
+                margin=dict(l=20, r=20, t=40, b=20)
+            )
+            st.plotly_chart(fig_eq, use_container_width=True)
+            
+        st.markdown("### 📝 Pełna historia operacji")
+        st.dataframe(df_dziennik, use_container_width=True)
+    else:
+        st.info("Twój dziennik jest na razie pusty. Użyj formularza powyżej, aby dodać pierwsze zagranie.")
