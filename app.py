@@ -277,7 +277,7 @@ with tab1:
         template="plotly_dark",
         margin=dict(l=20, r=20, t=40, b=20)
     )
-    st.plotly_chart(fig, width='stretch')
+    st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
     st.subheader("📰 Świeże wiadomości rynkowe (Real-Time)")
@@ -323,6 +323,7 @@ with tab3:
 
 with tab4:
     st.subheader("🔍 Skaner Okazji Rynkowych (Szybki przegląd rynku)")
+    
     if st.button("🚀 Uruchom skanowanie rynku"):
         with st.spinner("Skanowanie w toku..."):
             wyniki_skanera = []
@@ -354,7 +355,7 @@ with tab4:
                     })
             
             df_skaner = pd.DataFrame(wyniki_skanera)
-            st.dataframe(df_skaner, width='stretch')
+            st.dataframe(df_skaner, use_container_width=True)
 
 with tab5:
     st.subheader("📓 Dziennik Transakcji (Trading Journal)")
@@ -370,7 +371,7 @@ with tab5:
             c_f4, c_f5, c_f6 = st.columns(3)
             t_cena = c_f4.number_input("Cena Otwarcia:", value=ostatnia_cena, format="%.4f")
             t_status = c_f5.selectbox("Status:", ["Otwarte", "Zamknięte"])
-            t_pnl = c_f6.number_input("Wynik netto w PLN/USD (tylko dla zamkniętych):", value=0.0, format="%.2f")
+            t_pnl = c_f6.number_input("Wynik netto (bazowa waluta konta):", value=0.0, format="%.2f")
             
             submit_trade = st.form_submit_button("Zapisz w dzienniku")
             
@@ -387,18 +388,43 @@ with tab5:
                 zapisz_w_dzienniku(nowy_wpis)
                 st.success("✅ Dodano nową transakcję do dziennika!")
                 
-    st.markdown("### 📊 Historia Twoich Zagrań")
+    st.markdown("---")
+    st.markdown("### 📊 Zaawansowane Statystyki i Krzywa Kapitału")
     df_dziennik = wczytaj_dziennik()
     
     if not df_dziennik.empty:
-        st.dataframe(df_dziennik, width='stretch')
+        zamkniete = df_dziennik[df_dziennik['Status'] == 'Zamknięte'].copy()
         
-        zamkniete = df_dziennik[df_dziennik['Status'] == 'Zamknięte']
         if not zamkniete.empty:
-            suma_wynikow = pd.to_numeric(zamkniete['Wynik (PLN)'], errors='coerce').sum()
-            if suma_wynikow > 0:
-                st.success(f"💰 Łączny wynik z zamkniętych transakcji: **+{suma_wynikow:.2f}**")
-            else:
-                st.error(f"📉 Łączny wynik z zamkniętych transakcji: **{suma_wynikow:.2f}**")
-    else:
-        st.info("Twój dziennik jest na razie pusty. Rozwiń panel powyżej, aby dodać pierwsze zagranie z XTB.")
+            zamkniete['Wynik (PLN)'] = pd.to_numeric(zamkniete['Wynik (PLN)'], errors='coerce')
+            
+            # Obliczenia statystyk
+            total_trades = len(zamkniete)
+            zyskownych = len(zamkniete[zamkniete['Wynik (PLN)'] > 0])
+            stratnych = len(zamkniete[zamkniete['Wynik (PLN)'] <= 0])
+            win_rate = (zyskownych / total_trades) * 100 if total_trades > 0 else 0
+            suma_wynikow = zamkniete['Wynik (PLN)'].sum()
+            
+            c_s1, c_s2, c_s3, c_s4 = st.columns(4)
+            c_s1.metric("Zamknięte pozycje", total_trades)
+            c_s2.metric("Skuteczność (Win Rate)", f"{win_rate:.1f}%")
+            c_s3.metric("Zyskowne / Stratne", f"{zyskownych} / {stratnych}")
+            c_s4.metric("Całkowity Wynik (PnL)", f"{suma_wynikow:.2f} PLN")
+            
+            # Wykres krzywej kapitału
+            zamkniete['Krzywa Kapitału'] = zamkniete['Wynik (PLN)'].cumsum()
+            fig_eq = go.Figure()
+            fig_eq.add_trace(go.Scatter(
+                x=zamkniete['Data'], 
+                y=zamkniete['Krzywa Kapitału'], 
+                mode='lines+markers', 
+                name='Krzywa PnL', 
+                line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)
+            ))
+            fig_eq.update_layout(
+                title="Krzywa Zysków i Strat", 
+                template="plotly_dark", 
+                height=350,
+                margin=dict(l=20, r=20, t=40, b=20)
+            )
+            st.plotly_chart(fig_eq, use_container_width=True)
