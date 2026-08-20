@@ -8,7 +8,6 @@ import feedparser
 from textblob import TextBlob
 from datetime import datetime
 import os
-import re
 
 # Konfiguracja strony
 st.set_page_config(page_title="AI Trading Copilot Pro", layout="wide", page_icon="📈")
@@ -16,20 +15,44 @@ st.set_page_config(page_title="AI Trading Copilot Pro", layout="wide", page_icon
 st.title("🤖 AI Trading & Investment Copilot")
 st.caption("Wsparcie decyzji inwestycyjnych: Wall Street, GPW, Surowce, CFD (XTB)")
 
-# Predefiniowana baza aktywów
+# --- BAZA ULUBIONYCH AKTYWÓW (Wyszukuj pisząc nazwę w liście lub wpisz własny) ---
 popularne_aktywa = {
-    "Złoto CFD / Futures (GC=F)": {"ticker": "GC=F", "search_term": "Gold price commodity market"},
-    "Ropa WTI (CL=F)": {"ticker": "CL=F", "search_term": "Crude oil price energy market"},
-    "NVIDIA (NVDA)": {"ticker": "NVDA", "search_term": "NVIDIA stock news"},
-    "Apple (AAPL)": {"ticker": "AAPL", "search_term": "Apple stock market news"},
-    "Microsoft (MSFT)": {"ticker": "MSFT", "search_term": "Microsoft stock news"},
-    "Tesla (TSLA)": {"ticker": "TSLA", "search_term": "Tesla stock market news"},
-    "S&P 500 ETF (SPY)": {"ticker": "SPY", "search_term": "S&P 500 index market today"},
-    "CD Projekt (CDR.WA)": {"ticker": "CDR.WA", "search_term": "CD Projekt gielda akcje"},
-    "Orlen (PKN.WA)": {"ticker": "PKN.WA", "search_term": "PKN Orlen gielda GPW"},
-    "PKO BP (PKO.WA)": {"ticker": "PKO.WA", "search_term": "PKO BP bank gielda GPW"},
-    "KGHM (KGH.WA)": {"ticker": "KGH.WA", "search_term": "KGHM miedz gielda GPW"},
-    "Dino Polska (DNP.WA)": {"ticker": "DNP.WA", "search_term": "Dino Polska gielda GPW"}
+    # --- SUROWCE I KONTRAKTY ---
+    "🟡 Złoto (GC=F)": {"ticker": "GC=F", "search_term": "Gold price commodity market"},
+    "🛢️ Ropa WTI (CL=F)": {"ticker": "CL=F", "search_term": "Crude oil price energy market"},
+    "🛢️ Ropa Brent (BZ=F)": {"ticker": "BZ=F", "search_term": "Brent oil price energy market"},
+    "⚪ Srebro (SI=F)": {"ticker": "SI=F", "search_term": "Silver price commodity market"},
+    "⛽ Gaz Ziemny (NG=F)": {"ticker": "NG=F", "search_term": "Natural gas price energy"},
+    
+    # --- KRYPTOWALUTY ---
+    "₿ Bitcoin (BTC-USD)": {"ticker": "BTC-USD", "search_term": "Bitcoin crypto market news"},
+    "Ξ Ethereum (ETH-USD)": {"ticker": "ETH-USD", "search_term": "Ethereum crypto news"},
+    "🪙 Solana (SOL-USD)": {"ticker": "SOL-USD", "search_term": "Solana crypto news"},
+    
+    # --- GIEŁDA USA (WALL STREET) ---
+    "💻 NVIDIA (NVDA)": {"ticker": "NVDA", "search_term": "NVIDIA stock news"},
+    "🍏 Apple (AAPL)": {"ticker": "AAPL", "search_term": "Apple stock market news"},
+    "🪟 Microsoft (MSFT)": {"ticker": "MSFT", "search_term": "Microsoft stock news"},
+    "🚗 Tesla (TSLA)": {"ticker": "TSLA", "search_term": "Tesla stock market news"},
+    "📦 Amazon (AMZN)": {"ticker": "AMZN", "search_term": "Amazon stock market news"},
+    "🌐 Google / Alphabet (GOOGL)": {"ticker": "GOOGL", "search_term": "Google stock market news"},
+    "🥤 Coca-Cola (KO)": {"ticker": "KO", "search_term": "Coca Cola stock news"},
+    
+    # --- INDEKSY I ETF-Y ---
+    "🇺🇸 S&P 500 ETF (SPY)": {"ticker": "SPY", "search_term": "S&P 500 index market today"},
+    "🚀 Nasdaq 100 ETF (QQQ)": {"ticker": "QQQ", "search_term": "Nasdaq 100 ETF market"},
+    "🌍 Vanguard All-World ETF (VWCE.DE)": {"ticker": "VWCE.DE", "search_term": "VWCE ETF market news"},
+    
+    # --- GIEŁDA PAPIERÓW WARTOŚCIOWYCH W WARSZAWIE (GPW) ---
+    "🎮 CD Projekt (CDR.WA)": {"ticker": "CDR.WA", "search_term": "CD Projekt gielda akcje"},
+    "⛽ Orlen (PKN.WA)": {"ticker": "PKN.WA", "search_term": "PKN Orlen gielda GPW"},
+    "🏦 PKO BP (PKO.WA)": {"ticker": "PKO.WA", "search_term": "PKO BP bank gielda GPW"},
+    "⛏️ KGHM (KGH.WA)": {"ticker": "KGH.WA", "search_term": "KGHM miedz gielda GPW"},
+    "🛒 Dino Polska (DNP.WA)": {"ticker": "DNP.WA", "search_term": "Dino Polska gielda GPW"},
+    "🛍️ Allegro (ALR.WA)": {"ticker": "ALR.WA", "search_term": "Allegro gielda GPW"},
+    "⚡ PGE (PGE.WA)": {"ticker": "PGE.WA", "search_term": "PGE gielda GPW"},
+    "🏦 Bank Pekao (PEO.WA)": {"ticker": "PEO.WA", "search_term": "Bank Pekao gielda GPW"},
+    "🏗️ JSW (JSW.WA)": {"ticker": "JSW.WA", "search_term": "JSW gielda wegiel"}
 }
 
 # --- FUNKCJE DZIENNIKA TRANSAKCJI ---
@@ -50,17 +73,19 @@ def zapisz_w_dzienniku(nowy_wpis):
 
 # --- PANEL BOCZNY (Sidebar) ---
 st.sidebar.header("⚙️ Ustawienia analizy")
-wybor_predefiniowany = st.sidebar.selectbox("Wybierz z listy:", ["Wpisz własny..."] + list(popularne_aktywa.keys()))
+st.sidebar.caption("💡 Wskazówka: Kliknij poniższą listę i zacznij pisać nazwę (np. 'Złoto', 'Orlen', 'NVIDIA'), aby szybko wyszukać!")
 
-if wybor_predefiniowany == "Wpisz własny...":
-    ticker = st.sidebar.text_input("Wpisz Ticker (np. TSLA, KGH.WA, GC=F):", value="GC=F").upper()
+wybor_predefiniowany = st.sidebar.selectbox("⭐ Wybierz z ulubionych:", ["Wpisz własny ticker..."] + list(popularne_aktywa.keys()))
+
+if wybor_predefiniowany == "Wpisz własny ticker...":
+    ticker = st.sidebar.text_input("Wpisz Ticker ręcznie (np. TSLA, KGH.WA, GC=F):", value="GC=F").upper()
     search_query = ticker.replace(".WA", "") + " stock market news"
 else:
     ticker = popularne_aktywa[wybor_predefiniowany]["ticker"]
     search_query = popularne_aktywa[wybor_predefiniowany]["search_term"]
 
-okres = st.sidebar.selectbox("Zakres czasu:", ["1mo", "3mo", "6mo", "1y", "2y"], index=2)
-interwal = st.sidebar.selectbox("Interwał:", ["1d", "1wk"], index=0)
+okres = st.sidebar.selectbox("Zakres czasu wykresu:", ["1mo", "3mo", "6mo", "1y", "2y"], index=2)
+interwal = st.sidebar.selectbox("Interwał świec:", ["1d", "1wk"], index=0)
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚖️ Kalkulator Wielkości Pozycji (XTB)")
@@ -359,43 +384,9 @@ with tab4:
 
 with tab5:
     st.subheader("📓 Dziennik Transakcji (Trading Journal)")
-    st.caption("Notuj swoje wejścia na rynek lub skorzystaj z szybkiego wklejania z XTB.")
+    st.caption("Notuj swoje wejścia na rynek, aby budować statystykę zysków i strat.")
     
-    with st.expander("⚡ Szybkie wklejanie z XTB (Kopiuj-Wklej)", expanded=True):
-        st.info("Wklej tutaj tekst skopiowany z historii platformy XTB (np. szczegóły zamkniętej pozycji), a system uzupełni dane automatycznie.")
-        surowy_tekst = st.text_area("Wklej dane transakcji z XTB:")
-        
-        if st.button("✨ Przetwórz i dodaj automatycznie"):
-            if surowy_tekst:
-                try:
-                    znalezione_liczby = re.findall(r"[-+]?\d*\.\d+|\d+", surowy_tekst)
-                    slowa = surowy_tekst.split()
-                    wyciagniety_symbol = ticker 
-                    for s in slowa:
-                        if s.isupper() and len(s) >= 3 and len(s) <= 8:
-                            wyciagniety_symbol = s
-                            break
-                             
-                    pnl_wykryte = float(znalezione_liczby[-1]) if znalezione_liczby else 0.0
-                    
-                    nowy_wpis = {
-                        "Data": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "Aktywo": wyciagniety_symbol,
-                        "Kierunek": "KUPNO (Long)",
-                        "Wolumen": 1.0,
-                        "Cena Otwarcia": ostatnia_cena,
-                        "Status": "Zamknięte",
-                        "Wynik (PLN)": pnl_wykryte
-                    }
-                    zapisz_w_dzienniku(nowy_wpis)
-                    st.success(f"✅ Pomyślnie dodano transakcję! Wykryty wynik (PnL): {pnl_wykryte}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Nie udało się automatycznie przetworzyć tekstu. Użyj standardowego formularza poniżej. Błąd: {e}")
-            else:
-                st.warning("Najpierw wklej tekst w pole powyżej.")
-
-    with st.expander("➕ Dodaj nową transakcję ręcznie", expanded=False):
+    with st.expander("➕ Dodaj nową transakcję", expanded=True):
         with st.form("nowa_transakcja_form"):
             c_f1, c_f2, c_f3 = st.columns(3)
             t_aktywo = c_f1.text_input("Ticker / Aktywo:", value=ticker)
@@ -465,4 +456,4 @@ with tab5:
         st.markdown("### 📝 Pełna historia operacji")
         st.dataframe(df_dziennik, use_container_width=True)
     else:
-        st.info("Twój dziennik jest na razie pusty. Użyj szybkiego wklejania powyżej, aby dodać pierwsze zagranie.")
+        st.info("Twój dziennik jest na razie pusty. Użyj formularza powyżej, aby dodać pierwsze zagranie.")
