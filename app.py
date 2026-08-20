@@ -117,14 +117,12 @@ def dodaj_wskazniki(dane: pd.DataFrame) -> pd.DataFrame:
 
     df = dane.copy()
 
-    # Ujednolicenie nazw kolumn (przy MultiIndex / różnych formatach)
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    # Upewnij się, że mamy standardowe kolumny
+    # Próba ujednolicenia nazw
     potrzebne = {"Open", "High", "Low", "Close"}
     if not potrzebne.issubset(df.columns):
-        # próbujemy dopasować nazwy
         rename_map = {}
         for c in df.columns:
             lc = c.lower()
@@ -164,14 +162,14 @@ def dodaj_wskazniki(dane: pd.DataFrame) -> pd.DataFrame:
     df["MACD_Signal"] = df["MACD"].ewm(span=9, adjust=False).mean()
     df["MACD_Hist"] = df["MACD"] - df["MACD_Signal"]
 
-    # ATR (14) + True Range
+    # ATR (14)
     tr1 = df["High"] - df["Low"]
     tr2 = (df["High"] - df["Close"].shift()).abs()
     tr3 = (df["Low"] - df["Close"].shift()).abs()
     tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
     df["ATR"] = tr.rolling(window=14).mean()
 
-    # ADX (14) – siła trendu
+    # ADX (14)
     up_move = df["High"] - df["High"].shift(1)
     down_move = df["Low"].shift(1) - df["Low"]
     plus_dm = np.where(
@@ -191,7 +189,7 @@ def dodaj_wskazniki(dane: pd.DataFrame) -> pd.DataFrame:
     dx = (abs(plus_di - minus_di) / (plus_di + minus_di)) * 100
     df["ADX"] = dx.rolling(window=14).mean()
 
-    # Wolumen – jeśli dostępny
+    # Wolumen
     if "Volume" in df.columns:
         df["Vol_MA20"] = df["Volume"].rolling(window=20).mean()
         df["Vol_Ratio"] = df["Volume"] / df["Vol_MA20"]
@@ -225,8 +223,8 @@ def pobierz_dane(symbol: str, period: str, interval: str) -> pd.DataFrame:
 
 
 @st.cache_data(ttl=600)
-def pobierz_dane_multi(lista_symboli, period="3mo", interval="1d") -> dict:
-    """Pobiera dane dla wielu tickerów naraz (używane w skanerze)."""
+def pobierz_dane_multi(lista_symboli, period: str, interval: str) -> dict:
+    """Pobiera dane dla wielu tickerów naraz (używane w skanerze) z tym samym okresem i interwałem co analiza pojedyncza."""
     if not lista_symboli:
         return {}
 
@@ -251,10 +249,17 @@ def pobierz_dane_multi(lista_symboli, period="3mo", interval="1d") -> dict:
                 except Exception:
                     continue
         else:
-            # Fallback: pojedyncze zapytania
+            # Fallback: pojedyncze zapytania – wciąż z tym samym okresem/interwałem
             for sym in lista_symboli:
-                d = pobierz_dane(sym, period, interval)
+                d = yf.download(
+                    sym,
+                    period=period,
+                    interval=interval,
+                    auto_adjust=False,
+                    progress=False,
+                )
                 if d is not None and not d.empty:
+                    d = dodaj_wskazniki(d)
                     wyniki[sym] = d
 
         return wyniki
@@ -356,7 +361,7 @@ def oblicz_ai_werdykt(
         vol_signal = 0
         vol_opis = "Wolumen w normie / brak potwierdzenia"
 
-    # Początkowy score (bez filtrów jakości)
+    # Początkowy score
     base_score = (
         w_trend * trend_signal
         + w_rsi * rsi_signal
@@ -366,15 +371,12 @@ def oblicz_ai_werdykt(
     )
 
     # Jakość danych i filtry
-
     atr_ratio = atr / cena if cena > 0 else 0.0
 
-    # Mało danych
     if data_len < 50:
         base_score *= 0.7
         jakosc_flags.append("⚠️ Mało danych (mniej niż 50 świec) – score obniżony x0.7")
 
-    # Zmienność
     if atr_ratio > 0.05:
         jakosc_flags.append("⚠️ Bardzo wysoka zmienność (ATR > 5% ceny)")
     elif atr_ratio < 0.01:
@@ -485,7 +487,7 @@ def pobierz_swieze_newsy(symbol: str, query: str):
     return news_list
 
 # ---------------------------------------------------------
-# Sidebar – wybór aktywa, filtr, edytor bazy
+# Sidebar – wybór aktywa, edytor bazy, ustawienia
 # ---------------------------------------------------------
 st.sidebar.header("⚙️ Ustawienia analizy")
 
@@ -564,7 +566,7 @@ interwal = st.sidebar.selectbox(
 
 st.sidebar.markdown("---")
 
-# Ustawienia kalkulatora pozycji + XTB / CFD
+# Kalkulator pozycji + XTB / CFD
 st.sidebar.header("⚖️ Kalkulator Wielkości Pozycji (XTB)")
 kapital = st.sidebar.number_input(
     "Twój kapitał (PLN / USD):",
@@ -606,7 +608,7 @@ if instrument_typ == "CFD XTB":
 
 st.sidebar.markdown("---")
 
-# Ustawienia AI werdyktu – profil zamiast suwaków
+# Profil AI werdyktu
 st.sidebar.header("🤖 Profil AI werdyktu")
 profil_ai = st.sidebar.selectbox(
     "Wybierz profil sygnałów:",
@@ -646,7 +648,7 @@ ostatni_adx = float(df["ADX"].iloc[-1]) if not pd.isna(df["ADX"].iloc[-1]) else 
 ostatni_vol_ratio = float(df["Vol_Ratio"].iloc[-1]) if "Vol_Ratio" in df.columns and not pd.isna(df["Vol_Ratio"].iloc[-1]) else np.nan
 
 # ---------------------------------------------------------
-# News + sentyment (zależnie od języka)
+# News + sentyment
 # ---------------------------------------------------------
 surowe_newsy = pobierz_swieze_newsy(ticker, search_query)
 sentymenty = []
@@ -656,7 +658,6 @@ is_pl_symbol = ticker.endswith(".WA")
 
 for item in surowe_newsy:
     if is_pl_symbol:
-        # TextBlob nie działa dobrze dla PL – traktujemy jako neutralne
         polaryzacja = 0.0
         kolor = "⚪ Neutralny (PL – brak analizy AI)"
     else:
@@ -761,7 +762,6 @@ with tab1:
         row_heights=[0.55, 0.25, 0.2],
     )
 
-    # Świece
     fig.add_trace(
         go.Candlestick(
             x=df.index,
@@ -775,7 +775,6 @@ with tab1:
         col=1,
     )
 
-    # SMA i Bollinger
     fig.add_trace(
         go.Scatter(
             x=df.index,
@@ -827,7 +826,6 @@ with tab1:
         col=1,
     )
 
-    # MACD
     colors_hist = ["green" if val >= 0 else "red" for val in df["MACD_Hist"]]
     fig.add_trace(
         go.Bar(
@@ -860,7 +858,6 @@ with tab1:
         col=1,
     )
 
-    # Wolumen
     if "Volume" in df.columns:
         fig.add_trace(
             go.Bar(
@@ -925,12 +922,8 @@ with tab3:
         value=2.0,
         step=0.5,
     )
-    sugerowany_sl_long = float(
-        round(ostatnia_cena - (ostatni_atr * mnoznik_atr), 2)
-    )
-    sugerowany_tp_long = float(
-        round(ostatnia_cena + (ostatni_atr * mnoznik_atr * 2.0), 2)
-    )
+    sugerowany_sl_long = float(round(ostatnia_cena - (ostatni_atr * mnoznik_atr), 2))
+    sugerowany_tp_long = float(round(ostatnia_cena + (ostatni_atr * mnoznik_atr * 2.0), 2))
 
     c_sl, c_tp = st.columns(2)
     with c_sl:
@@ -977,7 +970,6 @@ with tab3:
             f"- Bieżąca zmienność ATR (14): **{ostatni_atr:.2f}**"
         )
 
-        # Prosta wizualizacja SL/TP
         fig_rr = go.Figure()
         fig_rr.add_trace(
             go.Scatter(
@@ -998,15 +990,19 @@ with tab3:
         st.warning("Stop Loss nie może być równy bieżącej cenie.")
 
 # ---------------------------------------------------------
-# Tab 4 – skaner rynku z AI score (z ADX i wolumenem)
+# Tab 4 – skaner rynku (spójny z AI werdyktem)
 # ---------------------------------------------------------
 with tab4:
     st.subheader("🔍 Skaner Okazji Rynkowych (Szybki przegląd rynku)")
 
+    st.caption(
+        f"Skaner używa tych samych ustawień czasu co główna analiza: okres = **{okres}**, interwał = **{interwal}**, profil AI = **{profil_ai}**."
+    )
+
     if st.button("🚀 Uruchom skanowanie rynku"):
         with st.spinner("Skanowanie w toku..."):
             lista_symboli = [v["ticker"] for v in popularne_aktywa.values()]
-            dane_multi = pobierz_dane_multi(lista_symboli, period="3mo", interval="1d")
+            dane_multi = pobierz_dane_multi(lista_symboli, period=okres, interval=interwal)
 
             wyniki_skanera = []
             for nazwa, dane_aktyw in popularne_aktywa.items():
@@ -1016,6 +1012,7 @@ with tab4:
                     continue
 
                 cena = float(d_skan["Close"].iloc[-1])
+
                 rsi_val = (
                     float(d_skan["RSI"].iloc[-1])
                     if "RSI" in d_skan.columns and not pd.isna(d_skan["RSI"].iloc[-1])
@@ -1073,7 +1070,7 @@ with tab4:
                     rsi=rsi_val,
                     macd=macd_val,
                     macd_sig=macd_sig_val,
-                    avg_sent=0.0,  # brak sentymentu w skanerze – neutralny
+                    avg_sent=0.0,
                     atr=atr_val,
                     adx=adx_val,
                     vol_ratio=vol_ratio_val,
@@ -1103,7 +1100,6 @@ with tab4:
 
             df_skaner = pd.DataFrame(wyniki_skanera)
 
-            # Proste filtry
             if not df_skaner.empty:
                 rsi_filter = st.selectbox(
                     "Filtr RSI:",
@@ -1126,7 +1122,6 @@ with tab4:
                 elif trend_filter == "Trend spadkowy":
                     df_view = df_view[df_view["Trend (SMA50)"].str.contains("Spadkowy")]
 
-                # Sortowanie po AI Score
                 df_view = df_view.sort_values("AI Score", ascending=False)
 
                 st.dataframe(df_view, use_container_width=True)
@@ -1194,7 +1189,6 @@ with tab5:
                 zamkniete["Wynik (PLN)"], errors="coerce"
             )
 
-            # Filtr po tickerze
             unikalne_tickers = sorted(zamkniete["Aktywo"].unique())
             ticker_filter = st.selectbox(
                 "Filtruj statystyki po tickerze:",
@@ -1215,7 +1209,6 @@ with tab5:
             )
             suma_wynikow = zamkniete_view["Wynik (PLN)"].sum()
 
-            # Dodatkowe metryki
             zyski = zamkniete_view[zamkniete_view["Wynik (PLN)"] > 0]["Wynik (PLN)"]
             straty = zamkniete_view[zamkniete_view["Wynik (PLN)"] < 0]["Wynik (PLN)"]
 
