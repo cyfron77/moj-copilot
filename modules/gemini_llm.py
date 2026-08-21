@@ -7,15 +7,19 @@ import streamlit as st
 def pobierz_ocene_llm(walor_nazwa: str, newsy_tekst: str, dane_fundamentalne_tekst: str) -> dict:
     """
     Wysyła zebrane dane do Gemini i zwraca oceny liczbowe w formacie JSON.
-    Wymaga ustawienia zmiennej środowiskowej GEMINI_API_KEY.
+    Pobiera klucz API ze Streamlit Secrets.
     """
-    api_key = os.getenv("GEMINI_API_KEY")
+    # Próba pobrania klucza ze Streamlit Secrets, a w ostateczności ze zmiennych środowiskowych
+    try:
+        api_key = st.secrets["GEMINI_API_KEY"]
+    except (FileNotFoundError, KeyError):
+        api_key = os.getenv("GEMINI_API_KEY")
+
     if not api_key:
-        st.warning("⚠️ Brak klucza API Gemini. Oceny LLM ustawiono na 0. Ustaw zmienną środowiskową GEMINI_API_KEY.")
+        st.warning("⚠️ Brak klucza API Gemini. Oceny LLM ustawiono na 0. Skonfiguruj klucz w ustawieniach aplikacji.")
         return {"sentyment_score": 0.0, "fundament_score": 0.0, "uzasadnienie": "Brak konfiguracji API."}
 
     genai.configure(api_key=api_key)
-    # Używamy modelu flash, który jest szybki i tani w użyciu API
     model = genai.GenerativeModel('gemini-1.5-flash')
 
     prompt = f"""
@@ -41,11 +45,9 @@ def pobierz_ocene_llm(walor_nazwa: str, newsy_tekst: str, dane_fundamentalne_tek
     
     try:
         response = model.generate_content(prompt)
-        # Czyszczenie odpowiedzi w razie gdyby LLM dodał znaczniki formatowania
         czysty_tekst = response.text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         wynik = json.loads(czysty_tekst)
         
-        # Zabezpieczenie przed przekroczeniem skali
         wynik["sentyment_score"] = max(-1.0, min(1.0, float(wynik.get("sentyment_score", 0.0))))
         wynik["fundament_score"] = max(-1.0, min(1.0, float(wynik.get("fundament_score", 0.0))))
         
