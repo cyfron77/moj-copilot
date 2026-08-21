@@ -29,16 +29,14 @@ def oblicz_werdykt_quant(
     # 2. Makro
     score_macro = makro_kierunek * wagi.get("w_macro", 1.0)
     
-    # 3. Sentyment & Fundamenty (dane z modelu LLM)
+    # 3. Sentyment & Fundamenty (LLM)
     score_sent = llm_sentyment * wagi.get("w_sentyment", 2.0)
     score_fund = llm_fundament * wagi.get("w_fundament", 2.5)
     
-    # --- MODEL KRÓTKOTERMINOWY (SWING / DAY) ---
-    # Skupia się na TA, Sentymencie (newsy) i Makro. Mniej patrzy na fundamenty kwartalne.
+    # Model Krótkoterminowy (Swing)
     swing_score = score_ta + score_macro + score_sent
     
-    # --- MODEL DŁUGOTERMINOWY (INVEST) ---
-    # Skupia się na Fundamentach (wyniki), głównym trendzie SMA200 i Makro. Wygładza sentyment.
+    # Model Długoterminowy (Invest)
     long_score = (sig_trend_dl * wagi.get("w_trend", 1.0)) + score_macro + score_fund + (score_sent * 0.5)
 
     def klasyfikuj(s, prog):
