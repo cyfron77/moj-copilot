@@ -20,7 +20,7 @@ def pobierz_ocene_llm(walor_nazwa: str, newsy_tekst: str, dane_fundamentalne_tek
         return {"sentyment_score": 0.0, "fundament_score": 0.0, "uzasadnienie": "Brak konfiguracji API."}
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-pro')
+    model = genai.GenerativeModel('gemini-1.5-flash')
 
     prompt = f"""
     Jesteś analitykiem finansowym na Wall Street i GPW. 
