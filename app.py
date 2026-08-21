@@ -740,13 +740,14 @@ else:
 # ---------------------------------------------------------
 # Zakładki główne
 # ---------------------------------------------------------
-tab1, tab2, tab3, tab4, tab5 = st.tabs(
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
         "📈 Zaawansowany Wykres (Wstęgi + MACD + Volume)",
         "🤖 Analiza Sentymentu (AI)",
         "⚖️ Kalkulator Pozycji & ATR",
         "🔍 Skaner Rynku (GPW & USA)",
         "📓 Dziennik Transakcji",
+        "🌐 Korelacje Makro",
     ]
 )
 
@@ -1264,3 +1265,78 @@ with tab5:
         st.info(
             "Twój dziennik jest na razie pusty. Użyj formularza powyżej, aby dodać pierwsze zagranie."
         )
+
+# ---------------------------------------------------------
+# Tab 6 – Korelacje Makroekonomiczne
+# ---------------------------------------------------------
+with tab6:
+    st.subheader("🌐 Wpływ czynników makroekonomicznych (Korelacja)")
+    st.caption(f"Sprawdzamy korelacje dla **{ticker}** na podstawie interwału **{interwal}** z okresu **{okres}**.")
+
+    # Słownik kluczowych wskaźników makro
+    MACRO_INDICATORS = {
+        "💵 Indeks Dolara (DXY)": "DX-Y.NYB",
+        "📈 Obligacje USA 10Y": "^TNX",
+        "😨 Indeks Strachu (VIX)": "^VIX",
+        "🛢️ Ropa WTI": "CL=F",
+        "🟡 Złoto": "GC=F"
+    }
+
+    if st.button("🔄 Oblicz korelacje makro"):
+        with st.spinner("Pobieranie i dopasowywanie danych makro..."):
+            # Pobranie danych dla wskaźników
+            macro_tickers = list(MACRO_INDICATORS.values())
+            dane_macro = pobierz_dane_multi(macro_tickers, period=okres, interval=interwal)
+
+            # Budowa DataFrame do porównania
+            df_corr = pd.DataFrame()
+            df_corr[ticker] = df["Close"] # Bierzemy główny walor
+
+            for nazwa, mac_ticker in MACRO_INDICATORS.items():
+                if mac_ticker in dane_macro and not dane_macro[mac_ticker].empty:
+                    # Dodajemy tylko ceny Close wskaźników
+                    df_corr[nazwa] = dane_macro[mac_ticker]["Close"]
+
+            # Usuwamy puste wiersze (np. przesunięcia ze względu na święta na różnych rynkach)
+            df_corr.dropna(inplace=True)
+
+            if len(df_corr) > 10:
+                # Wyliczenie korelacji Pearsona
+                korelacje = df_corr.corr(method="pearson")[ticker].drop(ticker)
+
+                st.markdown("### Wyniki korelacji (skala od -1.0 do 1.0)")
+                cols = st.columns(len(korelacje))
+                
+                for i, (nazwa, korelacja_val) in enumerate(korelacje.items()):
+                    # Ocena siły korelacji
+                    if korelacja_val > 0.7:
+                        sila, wplyw = "Silna dodatnia 🟢", "Rośnie wraz ze wskaźnikiem."
+                    elif korelacja_val > 0.3:
+                        sila, wplyw = "Słaba dodatnia ↗️", "Lekki wspólny kierunek."
+                    elif korelacja_val < -0.7:
+                        sila, wplyw = "Silna ujemna 🔴", "Traci, gdy wskaźnik rośnie."
+                    elif korelacja_val < -0.3:
+                        sila, wplyw = "Słaba ujemna ↘️", "Lekki odwrotny kierunek."
+                    else:
+                        sila, wplyw = "Brak korelacji ⚪", "Brak wyraźnego wpływu."
+
+                    cols[i].metric(nazwa, f"{korelacja_val:.2f}", sila)
+                    cols[i].caption(wplyw)
+
+                # Wykres korelacji Plotly
+                fig_corr = go.Figure(go.Bar(
+                    x=korelacje.values,
+                    y=korelacje.index,
+                    orientation='h',
+                    marker_color=["green" if val > 0 else "red" for val in korelacje.values]
+                ))
+                fig_corr.update_layout(
+                    title=f"Współczynnik korelacji z {ticker}",
+                    xaxis=dict(range=[-1.1, 1.1]),
+                    template="plotly_dark",
+                    height=350,
+                    margin=dict(l=20, r=20, t=40, b=20)
+                )
+                st.plotly_chart(fig_corr, use_container_width=True)
+            else:
+                st.warning("Za mało punktów wspólnych (świec), aby wyliczyć korelację. Spróbuj zwiększyć zakres czasu wykresu.")
