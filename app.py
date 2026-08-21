@@ -56,8 +56,17 @@ with st.sidebar.expander("🛠️ Edytor listy walorów"):
         st.success(f"Usunięto: {walor_do_usuniecia}")
         st.rerun()
 
-okres = st.sidebar.selectbox("Zakres czasu wykresu:", ["1mo", "3mo", "6mo", "1y", "2y"], index=2)
-interwal = st.sidebar.selectbox("Interwał świec:", ["1d", "1wk"], index=0)
+# Dodany zakres 5d (1 tydzień) oraz interwał 1h (1 godzina)
+okres = st.sidebar.selectbox(
+    "Zakres czasu wykresu:",
+    ["5d", "1mo", "3mo", "6mo", "1y", "2y"],
+    index=2,
+)
+interwal = st.sidebar.selectbox(
+    "Interwał świec:",
+    ["1h", "1d", "1wk"],
+    index=1,
+)
 
 st.sidebar.markdown("---")
 st.sidebar.header("⚖️ Kalkulator Wielkości Pozycji (XTB)")
@@ -79,7 +88,7 @@ wagi = AI_PROFILES[profil_ai]
 # ---------------------------------------------------------
 df = pobierz_dane(ticker, okres, interwal)
 if df is None or df.empty:
-    st.error(f"Nie udało się pobrać danych dla **{ticker}**.")
+    st.error(f"Nie udało się pobrać danych dla **{ticker}** w wybranym interwale/okresie.")
     st.stop()
 
 ostatnia_cena = float(df["Close"].iloc[-1])
@@ -207,7 +216,6 @@ with tab5:
     else:
         st.info("Dziennik jest pusty.")
 
-# TAB 6 – ZMODYFIKOWANY POD DEDYKOWANĄ MATRYCĘ
 with tab6:
-    st.subheader(f"🌐 Głębokiej Analiza Sektorowa i Makro dla: {ticker}")
+    st.subheader(f"🌐 Głęboka Analiza Sektorowa i Makro dla: {ticker}")
     oblicz_korelacje_makro(ticker, df, okres, interwal)
