@@ -1,131 +1,115 @@
 # config_correlations.py
 
 CORRELATION_MATRIX = {
-    # ------------------ GPW (POLSKA) ------------------
+    # ------------------ GPW (SUROWCE I ENERGIA) ------------------
     "KGH.WA": {
         "nazwa": "KGHM Polska Miedź",
         "drivery": {
-            "Miedź (Futures)": "HG=F",
-            "Srebro (Futures)": "SI=F",
-            "Kurs USD/PLN": "PLN=X",
-            "WIG20": "WIG20.WA",
-        },
-        "opis": "Kluczowe: Ceny surowców (miedź, srebro), kurs USD (przychody w USD) oraz szeroki rynek GPW."
+            "Miedź (Cena globalna)": {"ticker": "HG=F", "waga": 0.85, "opis": "Bezpośredni i natychmiastowy wpływ na wycenę. KGHM rośnie razem z miedzią."},
+            "Srebro": {"ticker": "SI=F", "waga": 0.50, "opis": "KGHM to jeden z czołowych producentów srebra na świecie (produkt uboczny)."},
+            "Kurs USD/PLN": {"ticker": "PLN=X", "waga": 0.60, "opis": "Przychody ze sprzedaży są w USD, koszty wydobycia w PLN. Drogi dolar to wyższe marże."},
+            "Gospodarka Chin (MCHI)": {"ticker": "MCHI", "waga": 0.40, "opis": "Chiny konsumują ponad 50% globalnej miedzi. Spowolnienie w Chinach uderza w popyt."}
+        }
     },
     "PKN.WA": {
         "nazwa": "Orlen",
         "drivery": {
-            "Ropa Brent": "BZ=F",
-            "Gaz Ziemny": "NG=F",
-            "Kurs USD/PLN": "PLN=X",
-            "WIG20": "WIG20.WA",
-        },
-        "opis": "Kluczowe: Marże rafineryjne powiązane z cenami ropy Brent i gazu oraz relacja USD/PLN."
+            "Ropa Brent": {"ticker": "BZ=F", "waga": 0.40, "opis": "Wpływa na wycenę zapasów i przychody z wydobycia, ale wysoka cena niszczy marże rafineryjne."},
+            "Sektor Energetyczny EU": {"ticker": "EXSA.DE", "waga": 0.60, "opis": "Sentyment do europejskiego sektora paliwowo-energetycznego (Stoxx 600 Energy)."},
+            "Gaz Ziemny": {"ticker": "NG=F", "waga": -0.30, "opis": "Gaz to ogromny koszt dla zakładów petrochemicznych (np. nawozy)."},
+            "Kurs USD/PLN": {"ticker": "PLN=X", "waga": 0.30, "opis": "Ropa kupowana jest w USD, zyski realizowane w PLN/EUR."}
+        }
+    },
+    "JSW.WA": {
+        "nazwa": "Jastrzębska Spółka Węglowa",
+        "drivery": {
+            "Sektor Stali (XME)": {"ticker": "XME", "waga": 0.70, "opis": "JSW produkuje węgiel koksowy (baza do produkcji stali). ETF XME to świetny wskaźnik koniunktury."},
+            "WIG20": {"ticker": "WIG20.WA", "waga": 0.40, "opis": "Sentyment kapitału zagranicznego do polskiego rynku ciężkiego."}
+        }
+    },
+
+    # ------------------ GPW (FINANSE I KONSUMPCJA) ------------------
+    "PKO.WA": {
+        "nazwa": "PKO BP",
+        "drivery": {
+            "WIG20": {"ticker": "WIG20.WA", "waga": 0.80, "opis": "Banki stanowią trzon WIG20. Mocna korelacja z kapitałem zagranicznym."},
+            "Kurs EUR/PLN": {"ticker": "EURPLN=X", "waga": -0.50, "opis": "Słaby złoty (wzrost EURPLN) oznacza wyjście zagranicy z GPW i spadki banków."},
+            "Sektor Bankowy EU": {"ticker": "EUFN", "waga": 0.60, "opis": "Europejski ETF finansowy. Koniunktura na europejskie banki udziela się polskim."}
+        }
     },
     "CDR.WA": {
         "nazwa": "CD Projekt",
         "drivery": {
-            "Kurs USD/PLN": "PLN=X",
-            "Nasdaq 100": "^IXIC",
-            "WIG20": "WIG20.WA",
-        },
-        "opis": "Kluczowe: Sprzedaż gier w USD/EUR (kurs walutowy) oraz sentyment do sektora tech/gaming."
+            "Sektor Gamingowy (ESPO)": {"ticker": "ESPO", "waga": 0.60, "opis": "VanEck Video Gaming ETF. Wyznacza globalny trend dla twórców gier."},
+            "Electronic Arts": {"ticker": "EA", "waga": 0.40, "opis": "Konkurencja z USA. Sentyment do branży AAA."},
+            "Kurs USD/PLN": {"ticker": "PLN=X", "waga": 0.50, "opis": "Większość gier sprzedawana jest w USD/EUR, koszty pracy są w PLN."}
+        }
     },
-    "PKO.WA": {
-        "nazwa": "PKO BP",
+    "DNP.WA": {
+        "nazwa": "Dino Polska",
         "drivery": {
-            "WIG20": "WIG20.WA",
-            "Kurs EUR/PLN": "EURPLN=X",
-            "Rentowności USA 10Y": "^TNX",
-        },
-        "opis": "Kluczowe: Koniunktura sektora bankowego, stopy procentowe i indeks WIG20."
-    },
-    "JSW.WA": {
-        "nazwa": "JSW",
-        "drivery": {
-            "WIG20": "WIG20.WA",
-            "Gaz Ziemny": "NG=F",
-            "Kurs USD/PLN": "PLN=X",
-        },
-        "opis": "Kluczowe: Ceny węgla koksowego/energii, kurs dolara i sentyment na GPW."
+            "Sektor Dóbr Podstawowych": {"ticker": "XLP", "waga": 0.50, "opis": "Globalny kapitał rotujący do spółek typu Consumer Staples."},
+            "Jeronimo Martins (Biedronka)": {"ticker": "JMT.LS", "waga": 0.70, "opis": "Główny rynkowy rywal. Spółki te często są wyceniane przez analityków parami."}
+        }
     },
 
-    # ------------------ US TECH / BIG TECH ------------------
+    # ------------------ US MEGA TECH / SEMICONDUCTORS ------------------
     "NVDA": {
         "nazwa": "NVIDIA",
         "drivery": {
-            "Rentowności Obligacji USA 10Y": "^TNX",
-            "Nasdaq 100 ETF (QQQ)": "QQQ",
-            "Indeks Strachu (VIX)": "^VIX",
-            "Indeks Dolara (DXY)": "DX-Y.NYB",
-        },
-        "opis": "Kluczowe: Koszt kapitału (stopy/TNX), popyt na AI/chipy i ogólny sentyment do Big Tech."
+            "TSMC (Produkcja chipów)": {"ticker": "TSM", "waga": 0.80, "opis": "TSMC produkuje fizycznie układy dla Nvidii. Ich wyniki to wskaźnik wyprzedzający."},
+            "Rentowności USA 10Y": {"ticker": "^TNX", "waga": -0.60, "opis": "Wzrost rentowności obligacji mocno dusi wyceny spółek technologicznych (koszt pieniądza)."},
+            "Sektor Półprzewodników": {"ticker": "SMH", "waga": 0.90, "opis": "Branżowy ETF (VanEck Semiconductor). Wyznacza trend dla całej gałęzi AI."}
+        }
     },
     "AAPL": {
         "nazwa": "Apple",
         "drivery": {
-            "Nasdaq 100 ETF (QQQ)": "QQQ",
-            "Rentowności USA 10Y": "^TNX",
-            "Indeks Dolara (DXY)": "DX-Y.NYB",
-            "S&P 500 (SPY)": "SPY",
-        },
-        "opis": "Kluczowe: Siła konsumenta, sentyment Nasdaq oraz kurs dolara (sprzedaż globalna)."
-    },
-    "MSFT": {
-        "nazwa": "Microsoft",
-        "drivery": {
-            "Nasdaq 100 ETF (QQQ)": "QQQ",
-            "Rentowności USA 10Y": "^TNX",
-            "S&P 500 (SPY)": "SPY",
-        },
-        "opis": "Kluczowe: Wydatki na chmurę/AI, korelacja z szerokim indeksem Nasdaq."
+            "Nasdaq 100": {"ticker": "QQQ", "waga": 0.85, "opis": "Apple to waga ciężka w Nasdaq. Podążają niemal identycznie."},
+            "Indeks Dolara (DXY)": {"ticker": "DX-Y.NYB", "waga": -0.40, "opis": "Apple generuje zyski globalnie. Silny dolar obniża ich przychody z zagranicy po przewalutowaniu."},
+            "Foxconn / TSMC": {"ticker": "TSM", "waga": 0.50, "opis": "Łańcuch dostaw (produkcja iPhone'ów)."}
+        }
     },
     "TSLA": {
         "nazwa": "Tesla",
         "drivery": {
-            "Nasdaq 100 ETF (QQQ)": "QQQ",
-            "Ropa WTI": "CL=F",
-            "Rentowności USA 10Y": "^TNX",
-            "Indeks Strachu (VIX)": "^VIX",
-        },
-        "opis": "Kluczowe: Ceny energii/paliw, sentyment do spółek wzrostowych i apetyt na ryzyko."
+            "Indeks Strachu (VIX)": {"ticker": "^VIX", "waga": -0.70, "opis": "Tesla to walor wysokiego ryzyka. Gdy rośnie strach na rynku (VIX), Tesla mocno traci."},
+            "Sektor Baterii / Lit": {"ticker": "LIT", "waga": 0.60, "opis": "ETF na producentów litu i baterii. Koszt i podaż kluczowych komponentów."},
+            "Ropa WTI": {"ticker": "CL=F", "waga": 0.30, "opis": "Wysokie ceny paliw napędzają długoterminowy popyt na auta EV."}
+        }
     },
 
-    # ------------------ SUROWCE I KRYPTO ------------------
+    # ------------------ KRYPTOWALUTY ------------------
+    "BTC-USD": {
+        "nazwa": "Bitcoin",
+        "drivery": {
+            "Nasdaq 100": {"ticker": "QQQ", "waga": 0.70, "opis": "Krypto jest obecnie wyceniane jako lewarowany sektor technologiczny."},
+            "Indeks Dolara (DXY)": {"ticker": "DX-Y.NYB", "waga": -0.75, "opis": "Odwrotna korelacja. Gdy fiat (dolar) słabnie, krypto rośnie."},
+            "Złoto": {"ticker": "GC=F", "waga": 0.30, "opis": "Konkurent o miano 'cyfrowego złota', choć korelacja bywa zmienna."}
+        }
+    },
+
+    # ------------------ SUROWCE BAZOWE ------------------
     "GC=F": {
         "nazwa": "Złoto",
         "drivery": {
-            "Indeks Dolara (DXY)": "DX-Y.NYB",
-            "Rentowności Obligacji USA 10Y": "^TNX",
-            "Srebro": "SI=F",
-            "Indeks Strachu (VIX)": "^VIX",
-        },
-        "opis": "Kluczowe: Zależność odwrotna do siły dolara (DXY) i rentowności obligacji, popyt safe-haven (VIX)."
+            "Realne Stopy / US 10Y": {"ticker": "^TNX", "waga": -0.85, "opis": "Złoto nie płaci dywidendy. Gdy obligacje dają wysoki procent, kapitał ucieka ze złota."},
+            "Indeks Dolara (DXY)": {"ticker": "DX-Y.NYB", "waga": -0.80, "opis": "Złoto wyceniane w USD. Silny dolar = tańsze złoto dla reszty świata."},
+            "Indeks Strachu (VIX)": {"ticker": "^VIX", "waga": 0.50, "opis": "Bezpieczna przystań (Safe Haven) w czasach paniki rynkowej."}
+        }
     },
     "CL=F": {
         "nazwa": "Ropa WTI",
         "drivery": {
-            "Indeks Dolara (DXY)": "DX-Y.NYB",
-            "Gaz Ziemny": "NG=F",
-            "S&P 500 (SPY)": "SPY",
-        },
-        "opis": "Kluczowe: Siła gospodarki globalnej (SPY), kurs dolara i rynek paliw kopalnych."
-    },
-    "BTC-USD": {
-        "nazwa": "Bitcoin",
-        "drivery": {
-            "Nasdaq 100 ETF (QQQ)": "QQQ",
-            "Indeks Dolara (DXY)": "DX-Y.NYB",
-            "Indeks Strachu (VIX)": "^VIX",
-            "Złoto": "GC=F",
-        },
-        "opis": "Kluczowe: Płynność rynkowa, korelacja z rynkiem tech i apetyt na ryzyko (risk-on / risk-off)."
+            "Sektor Transportu / Przemysł": {"ticker": "XLI", "waga": 0.60, "opis": "Przemysł i logistyka to główni konsumenci energii i paliw."},
+            "Indeks Dolara (DXY)": {"ticker": "DX-Y.NYB", "waga": -0.50, "opis": "Ropa rozliczana w USD. Słaby dolar sztucznie podbija cenę za baryłkę."}
+        }
     }
 }
 
+# Domyślny fallback dla pozostałych, niewymienionych wyżej walorów z Twojej listy (np. indeksów)
 DEFAULT_DRIVERS = {
-    "S&P 500 (SPY)": "SPY",
-    "Indeks Dolara (DXY)": "DX-Y.NYB",
-    "Indeks Strachu (VIX)": "^VIX",
-    "Rentowności USA 10Y": "^TNX"
+    "S&P 500": {"ticker": "SPY", "waga": 1.0, "opis": "Ogólny rynek akcji USA."},
+    "Indeks Dolara": {"ticker": "DX-Y.NYB", "waga": -0.5, "opis": "Siła waluty rezerwowej."},
+    "Rentowności 10Y": {"ticker": "^TNX", "waga": -0.5, "opis": "Koszt pieniądza."}
 }
