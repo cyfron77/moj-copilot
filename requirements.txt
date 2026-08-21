@@ -5,4 +5,4 @@ pandas
 numpy
 feedparser
 textblob
-google-generativeai
+google-generativeai>=0.8.0
