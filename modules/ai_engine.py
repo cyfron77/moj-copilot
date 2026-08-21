@@ -1,131 +1,67 @@
 # modules/ai_engine.py
 import pandas as pd
 
-AI_PROFILES = {
-    "Zbalansowany": {"w_trend": 1.0, "w_rsi": 1.0, "w_macd": 1.0, "w_sent": 1.0, "w_vol": 1.0},
-    "Konserwatywny": {"w_trend": 1.5, "w_rsi": 1.0, "w_macd": 1.5, "w_sent": 0.5, "w_vol": 1.0},
-    "Agresywny": {"w_trend": 0.8, "w_rsi": 1.2, "w_macd": 1.2, "w_sent": 1.0, "w_vol": 0.8},
-}
-
-
-def oblicz_ai_werdykt(
-    cena: float,
-    sma50: float,
-    sma200: float,
-    rsi: float,
-    macd: float,
-    macd_sig: float,
-    avg_sent: float,
-    atr: float,
-    adx: float,
-    vol_ratio: float,
-    data_len: int,
-    w_trend: float,
-    w_rsi: float,
-    w_macd: float,
-    w_sent: float,
-    w_vol: float,
-) -> dict:
-    jakosc_flags = []
-
-    # Trend (SMA50)
-    trend_signal = 1 if cena > sma50 else -1
-    trend_opis = "Trend wzrostowy (Cena > SMA50)" if trend_signal == 1 else "Trend spadkowy (Cena < SMA50)"
-
+def generuj_sygnaly_techniczne(cena, sma50, sma200, rsi, macd, macd_sig):
     # RSI
-    if rsi < 35:
-        rsi_signal = 1
-        rsi_opis = "Wyprzedanie (RSI < 35)"
-    elif rsi > 70:
-        rsi_signal = -1
-        rsi_opis = "Wykupienie (RSI > 70)"
-    else:
-        rsi_signal = 0
-        rsi_opis = "RSI neutralny (35–70)"
-
+    if rsi < 35: sig_rsi = 1
+    elif rsi > 70: sig_rsi = -1
+    else: sig_rsi = 0
+    
     # MACD
-    if macd > macd_sig:
-        macd_signal = 1
-        macd_opis = "MACD > Sygnał (pro-wzrostowo)"
-    else:
-        macd_signal = -1
-        macd_opis = "MACD < Sygnał (pro-spadkowo)"
+    sig_macd = 1 if macd > macd_sig else -1
+    
+    # Trend
+    sig_trend_kr = 1 if cena > sma50 else -1
+    sig_trend_dl = 1 if (not pd.isna(sma200) and cena > sma200) else -1
+    
+    return sig_rsi, sig_macd, sig_trend_kr, sig_trend_dl
 
-    # Sentyment
-    if avg_sent > 0.05:
-        sent_signal = 1
-        sent_opis = "Pozytywny / byczy"
-    elif avg_sent < -0.05:
-        sent_signal = -1
-        sent_opis = "Negatywny / niedźwiedzi"
-    else:
-        sent_signal = 0
-        sent_opis = "Neutralny"
+def oblicz_werdykt_quant(
+    cena: float, sma50: float, sma200: float, rsi: float, macd: float, macd_sig: float,
+    llm_sentyment: float, llm_fundament: float, makro_kierunek: float,
+    wagi: dict
+):
+    sig_rsi, sig_macd, sig_trend_kr, sig_trend_dl = generuj_sygnaly_techniczne(cena, sma50, sma200, rsi, macd, macd_sig)
+    
+    # 1. Analiza Techniczna
+    score_ta = (sig_rsi * wagi.get("w_rsi", 1.0)) + (sig_macd * wagi.get("w_macd", 1.0)) + (sig_trend_kr * wagi.get("w_trend", 1.0))
+    
+    # 2. Makro
+    score_macro = makro_kierunek * wagi.get("w_macro", 1.0)
+    
+    # 3. Sentyment & Fundamenty (dane z modelu LLM)
+    score_sent = llm_sentyment * wagi.get("w_sentyment", 2.0)
+    score_fund = llm_fundament * wagi.get("w_fundament", 2.5)
+    
+    # --- MODEL KRÓTKOTERMINOWY (SWING / DAY) ---
+    # Skupia się na TA, Sentymencie (newsy) i Makro. Mniej patrzy na fundamenty kwartalne.
+    swing_score = score_ta + score_macro + score_sent
+    
+    # --- MODEL DŁUGOTERMINOWY (INVEST) ---
+    # Skupia się na Fundamentach (wyniki), głównym trendzie SMA200 i Makro. Wygładza sentyment.
+    long_score = (sig_trend_dl * wagi.get("w_trend", 1.0)) + score_macro + score_fund + (score_sent * 0.5)
 
-    # Wolumen
-    if not pd.isna(vol_ratio) and vol_ratio >= 1.3:
-        vol_signal = 1
-        vol_opis = "Wzmożony wolumen (>=130% średniej)"
-    else:
-        vol_signal = 0
-        vol_opis = "Wolumen w normie / brak potwierdzenia"
+    def klasyfikuj(s, prog):
+        if s >= prog: return "ZDECYDOWANY LONG 🟢", "success"
+        elif s > (prog/2): return "LEKKI LONG ↗️", "success"
+        elif s <= -prog: return "ZDECYDOWANY SHORT 🔴", "error"
+        elif s < -(prog/2): return "LEKKI SHORT ↘️", "error"
+        else: return "NEUTRALNY / CZEKAJ ⚪", "warning"
 
-    base_score = (
-        w_trend * trend_signal
-        + w_rsi * rsi_signal
-        + w_macd * macd_signal
-        + w_sent * sent_signal
-        + w_vol * vol_signal
-    )
-
-    atr_ratio = atr / cena if cena > 0 else 0.0
-    if data_len < 50:
-        base_score *= 0.7
-        jakosc_flags.append("⚠️ Mało danych (mniej niż 50 świec) – score x0.7")
-
-    if atr_ratio > 0.05:
-        jakosc_flags.append("⚠️ Bardzo wysoka zmienność (ATR > 5% ceny)")
-    elif atr_ratio < 0.01:
-        jakosc_flags.append("ℹ️ Niska zmienność (ATR < 1% ceny)")
-
-    if not pd.isna(sma200):
-        if cena < sma200:
-            base_score *= 0.7
-            jakosc_flags.append("⚠️ Cena poniżej SMA200 (score x0.7)")
-        elif cena > sma200 and trend_signal == 1:
-            base_score *= 1.1
-            jakosc_flags.append("✅ Cena powyżej SMA200 i SMA50 (score x1.1)")
-
-    if not pd.isna(adx):
-        if adx < 20:
-            base_score *= 0.8
-            jakosc_flags.append("⚠️ Słaby trend (ADX < 20) (score x0.8)")
-        elif adx > 25:
-            base_score *= 1.1
-            jakosc_flags.append("✅ Silny trend (ADX > 25) (score x1.1)")
-
-    if base_score >= 3:
-        status = "MOCNY KANDYDAT NA LONGA (KUPNO)"
-        kolor = "success"
-        komentarz = "Przewaga sygnałów prowzrostowych."
-    elif base_score <= -3:
-        status = "KANDYDAT NA SHORTA / OSTRZEŻENIE"
-        kolor = "error"
-        komentarz = "Przewaga sygnałów prospadkowych."
-    else:
-        status = "NEUTRALNY / OBSERWACJA"
-        kolor = "info"
-        komentarz = "Sygnały mieszane lub rynek w konsolidacji."
+    swing_status, swing_kolor = klasyfikuj(swing_score, 2.5)
+    long_status, long_kolor = klasyfikuj(long_score, 3.0)
 
     return {
-        "score": base_score,
-        "status": status,
-        "kolor": kolor,
-        "komentarz": komentarz,
-        "trend_opis": trend_opis,
-        "rsi_opis": rsi_opis,
-        "macd_opis": macd_opis,
-        "sent_opis": sent_opis,
-        "vol_opis": vol_opis,
-        "jakosc_flags": jakosc_flags,
+        "swing_score": swing_score,
+        "swing_status": swing_status,
+        "swing_kolor": swing_kolor,
+        "long_score": long_score,
+        "long_status": long_status,
+        "long_kolor": long_kolor,
+        "detale": {
+            "TA": score_ta,
+            "Makro": score_macro,
+            "Sentyment": score_sent,
+            "Fundamenty": score_fund
+        }
     }
