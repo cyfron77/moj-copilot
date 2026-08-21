@@ -742,7 +742,7 @@ else:
 # ---------------------------------------------------------
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
     [
-        "📈 Zaawansowany Wykres (Wstęgi + MACD + Volume)",
+        "📈 Zaawansowany Wykres",
         "🤖 Analiza Sentymentu (AI)",
         "⚖️ Kalkulator Pozycji & ATR",
         "🔍 Skaner Rynku (GPW & USA)",
