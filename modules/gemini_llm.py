@@ -5,6 +5,7 @@ import json
 import streamlit as st
 
 def pobierz_ocene_llm(walor_nazwa: str, newsy_tekst: str, dane_fundamentalne_tekst: str) -> dict:
+    # Pobranie klucza
     try:
         api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
     except:
@@ -16,23 +17,15 @@ def pobierz_ocene_llm(walor_nazwa: str, newsy_tekst: str, dane_fundamentalne_tek
     genai.configure(api_key=api_key)
 
     try:
-        # DIAGNOSTYKA: Pobieramy listę autoryzowanych modeli dla tego klucza
-        dostepne_modele = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
-        st.warning(f"Diagnostyka API. Twój klucz widzi modele: {dostepne_modele}")
-        
-        # Automatyczny wybór pierwszego działającego modelu Gemini
-        wybrany_model = next((m for m in dostepne_modele if "gemini" in m), None)
-        
-        if not wybrany_model:
-            return {"sentyment_score": 0.0, "fundament_score": 0.0, "uzasadnienie": "Klucz API nie ma dostępu do żadnego modelu Gemini."}
-        
-        # GenerativeModel wymaga nazwy bez prefiksu "models/"
-        nazwa_bez_prefiksu = wybrany_model.replace("models/", "")
-        model = genai.GenerativeModel(nazwa_bez_prefiksu)
+        # Twarde przypisanie modelu wymaganego przez serwery API
+        model = genai.GenerativeModel('gemini-3.6-flash')
 
         prompt = f"""
-        Oceń walor {walor_nazwa} w skali od -1.0 do 1.0. Zwróć TYLKO czysty kod JSON:
-        {{"sentyment_score": float, "fundament_score": float, "uzasadnienie": "tekst"}}
+        Jesteś analitykiem finansowym na Wall Street i GPW. 
+        Oceń walor {walor_nazwa} w skali od -1.0 (bardzo negatywnie) do 1.0 (bardzo pozytywnie). 
+        Zwróć TYLKO czysty kod JSON, żadnych znaczników markdown:
+        {{"sentyment_score": float, "fundament_score": float, "uzasadnienie": "Zwięzłe uzasadnienie, max 2 zdania"}}
+        
         Newsy: {newsy_tekst}
         Fundamenty: {dane_fundamentalne_tekst}
         """
