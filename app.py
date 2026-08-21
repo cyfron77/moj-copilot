@@ -11,6 +11,7 @@ from modules.ai_engine import AI_PROFILES, oblicz_ai_werdykt
 from modules.news_sentiment import pobierz_swieze_newsy, przetworz_sentyment
 from modules.journal import wczytaj_baze_aktywow, zapisz_baze_aktywow, wczytaj_dziennik, zapisz_w_dzienniku
 from modules.correlations import oblicz_korelacje_makro
+from modules.earnings import wyswietl_kalendarz_wynikow
 
 # ---------------------------------------------------------
 # Konfiguracja strony
@@ -56,7 +57,6 @@ with st.sidebar.expander("🛠️ Edytor listy walorów"):
         st.success(f"Usunięto: {walor_do_usuniecia}")
         st.rerun()
 
-# Dodany zakres 5d (1 tydzień) oraz interwał 1h (1 godzina)
 okres = st.sidebar.selectbox(
     "Zakres czasu wykresu:",
     ["5d", "1mo", "3mo", "6mo", "1y", "2y"],
@@ -136,13 +136,14 @@ else: st.info(komunikat)
 # ---------------------------------------------------------
 # Zakładki
 # ---------------------------------------------------------
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
     "📈 Wykres Zaawansowany",
     "🤖 Sentyment i Newsy",
     "⚖️ Kalkulator Pozycji",
     "🔍 Skaner Rynku",
     "📓 Dziennik Transakcji",
-    "🌐 Dedykowane Czynniki & Korelacje"
+    "🌐 Czynniki & Korelacje",
+    "📅 Kalendarz & Wyniki"
 ])
 
 with tab1:
@@ -219,3 +220,6 @@ with tab5:
 with tab6:
     st.subheader(f"🌐 Głęboka Analiza Sektorowa i Makro dla: {ticker}")
     oblicz_korelacje_makro(ticker, df, okres, interwal)
+
+with tab7:
+    wyswietl_kalendarz_wynikow(ticker)
