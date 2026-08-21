@@ -209,35 +209,5 @@ with tab5:
 
 # TAB 6 – ZMODYFIKOWANY POD DEDYKOWANĄ MATRYCĘ
 with tab6:
-    st.subheader(f"🌐 Dedykowane czynniki i drivery dla: {ticker}")
-    
-    korelacje, opis = oblicz_korelacje_makro(ticker, df, okres, interwal)
-    st.info(f"💡 **Charakterystyka waloru:** {opis}")
-
-    if not korelacje.empty:
-        st.markdown("### Obliczone korelacje z dedykowanymi czynnikami:")
-        cols = st.columns(len(korelacje))
-        for i, (nazwa, kor) in enumerate(korelacje.items()):
-            if kor > 0.6: sila = "Silna dodatnia 🟢"
-            elif kor > 0.2: sila = "Umiarkowana ↗️"
-            elif kor < -0.6: sila = "Silna ujemna 🔴"
-            elif kor < -0.2: sila = "Odwrotna ↘️"
-            else: sila = "Neutralna ⚪"
-            cols[i].metric(nazwa, f"{kor:.2f}", sila)
-
-        fig_bar = go.Figure(go.Bar(
-            x=korelacje.values,
-            y=korelacje.index,
-            orientation='h',
-            marker_color=["green" if val > 0 else "red" for val in korelacje.values]
-        ))
-        fig_bar.update_layout(
-            title=f"Wpływ dedykowanych czynników na {ticker}",
-            xaxis=dict(range=[-1.1, 1.1]),
-            template="plotly_dark",
-            height=320,
-            margin=dict(l=20, r=20, t=40, b=20)
-        )
-        st.plotly_chart(fig_bar, use_container_width=True)
-    else:
-        st.warning("Zbyt mało danych do obliczenia korelacji dla tego okresu/interwału.")
+    st.subheader(f"🌐 Głębokiej Analiza Sektorowa i Makro dla: {ticker}")
+    oblicz_korelacje_makro(ticker, df, okres, interwal)
