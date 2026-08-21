@@ -5,56 +5,47 @@ import json
 import streamlit as st
 
 def pobierz_ocene_llm(walor_nazwa: str, newsy_tekst: str, dane_fundamentalne_tekst: str) -> dict:
-    """
-    Wysyła zebrane dane do Gemini i zwraca oceny liczbowe w formacie JSON.
-    Pobiera klucz API ze Streamlit Secrets.
-    """
-    # Próba pobrania klucza ze Streamlit Secrets, a w ostateczności ze zmiennych środowiskowych
     try:
-        api_key = st.secrets["GEMINI_API_KEY"]
-    except (FileNotFoundError, KeyError):
+        api_key = st.secrets.get("GEMINI_API_KEY", os.getenv("GEMINI_API_KEY"))
+    except:
         api_key = os.getenv("GEMINI_API_KEY")
 
     if not api_key:
-        st.warning("⚠️ Brak klucza API Gemini. Oceny LLM ustawiono na 0. Skonfiguruj klucz w ustawieniach aplikacji.")
-        return {"sentyment_score": 0.0, "fundament_score": 0.0, "uzasadnienie": "Brak konfiguracji API."}
+        return {"sentyment_score": 0.0, "fundament_score": 0.0, "uzasadnienie": "Brak klucza API."}
 
     genai.configure(api_key=api_key)
-    model = genai.GenerativeModel('gemini-1.5-flash')
 
-    prompt = f"""
-    Jesteś analitykiem finansowym na Wall Street i GPW. 
-    Przeanalizuj poniższe dane dla waloru: {walor_nazwa}.
-    
-    Wydaj ocenę w dwóch kategoriach w skali od -1.0 (bardzo negatywnie) do 1.0 (bardzo pozytywnie).
-    
-    Zwróć TYLKO czysty, poprawny kod JSON. Żadnego formatowania markdown, żadnych znaczników ```json.
-    Struktura:
-    {{
-        "sentyment_score": float,
-        "fundament_score": float,
-        "uzasadnienie": "Zwięzłe uzasadnienie, max 2 zdania"
-    }}
-
-    Newsy z ostatnich dni:
-    {newsy_tekst}
-
-    Dane fundamentalne i kalendarz wyników:
-    {dane_fundamentalne_tekst}
-    """
-    
     try:
+        # DIAGNOSTYKA: Pobieramy listę autoryzowanych modeli dla tego klucza
+        dostepne_modele = [m.name for m in genai.list_models() if 'generateContent' in m.supported_generation_methods]
+        st.warning(f"Diagnostyka API. Twój klucz widzi modele: {dostepne_modele}")
+        
+        # Automatyczny wybór pierwszego działającego modelu Gemini
+        wybrany_model = next((m for m in dostepne_modele if "gemini" in m), None)
+        
+        if not wybrany_model:
+            return {"sentyment_score": 0.0, "fundament_score": 0.0, "uzasadnienie": "Klucz API nie ma dostępu do żadnego modelu Gemini."}
+        
+        # GenerativeModel wymaga nazwy bez prefiksu "models/"
+        nazwa_bez_prefiksu = wybrany_model.replace("models/", "")
+        model = genai.GenerativeModel(nazwa_bez_prefiksu)
+
+        prompt = f"""
+        Oceń walor {walor_nazwa} w skali od -1.0 do 1.0. Zwróć TYLKO czysty kod JSON:
+        {{"sentyment_score": float, "fundament_score": float, "uzasadnienie": "tekst"}}
+        Newsy: {newsy_tekst}
+        Fundamenty: {dane_fundamentalne_tekst}
+        """
+        
         response = model.generate_content(prompt)
         czysty_tekst = response.text.strip().removeprefix("```json").removeprefix("```").removesuffix("```").strip()
         wynik = json.loads(czysty_tekst)
         
-        wynik["sentyment_score"] = max(-1.0, min(1.0, float(wynik.get("sentyment_score", 0.0))))
-        wynik["fundament_score"] = max(-1.0, min(1.0, float(wynik.get("fundament_score", 0.0))))
-        
-        return wynik
-    except Exception as e:
         return {
-            "sentyment_score": 0.0, 
-            "fundament_score": 0.0, 
-            "uzasadnienie": f"Błąd parsowania lub połączenia API LLM: {str(e)}"
+            "sentyment_score": max(-1.0, min(1.0, float(wynik.get("sentyment_score", 0.0)))),
+            "fundament_score": max(-1.0, min(1.0, float(wynik.get("fundament_score", 0.0)))),
+            "uzasadnienie": wynik.get("uzasadnienie", "")
         }
+
+    except Exception as e:
+        return {"sentyment_score": 0.0, "fundament_score": 0.0, "uzasadnienie": f"Błąd API: {str(e)}"}
