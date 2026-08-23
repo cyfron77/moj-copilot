@@ -1,1 +1,33 @@
+name: Auto Skaner Quant Model
 
+on:
+  schedule:
+    # Skrypt będzie uruchamiał się od poniedziałku do piątku (1-5) 
+    # o 09:00 rano oraz 16:00 (czasu UTC, czyli ok. 10:00/11:00 i 17:00/18:00 czasu polskiego)
+    - cron: '0 9,16 * * 1-5'
+  workflow_dispatch: # To pozwala Ci kliknąć przycisk "Run workflow" ręcznie
+
+jobs:
+  skanuj:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pobranie kodu aplikacji
+        uses: actions/checkout@v3
+
+      - name: Konfiguracja języka Python (wersja 3.10)
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Instalacja wymaganych bibliotek
+        run: |
+          pip install -r requirements.txt
+          pip install requests
+
+      - name: Uruchomienie bota analizującego rynek
+        env:
+          # Bezpieczne wstrzyknięcie kluczy przechowywanych w GitHub Secrets
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          TELEGRAM_TOKEN: ${{ secrets.TELEGRAM_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python bot_skaner.py
