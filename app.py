@@ -89,7 +89,7 @@ if st.button("🚀 Wykonaj Analizę Gemini dla tego waloru (Zrozumienie newsów 
     with st.spinner("Gemini analizuje wiadomości i raporty finansowe..."):
         # Pobranie newsów
         raw_news = pobierz_swieze_newsy(ticker, search_query)
-       newsy_tekst = "\n".join([f"- [{n['data']}] {n['tytul']} ({n['zrodlo']})" for n in raw_news])
+        newsy_tekst = "\n".join([f"- [{n['data']}] {n['tytul']} ({n['zrodlo']})" for n in raw_news])
         
         # Pobranie TWARDYCH DANYCH z nowych modułów
         fundamenty_tekst = pobierz_fundamenty_tekst(ticker)
@@ -108,7 +108,7 @@ if st.button("🚀 Wykonaj Analizę Gemini dla tego waloru (Zrozumienie newsów 
         llm_data = wynik_llm
         
         st.info("Dane sentymentu i fundamentów zostały wygenerowane na bazie wskaźników finansowych przez model Gemini.")
-
+        
 # ---------------------------------------------------------
 # WERDYKT QUANT (Krótki vs Długi termin)
 # ---------------------------------------------------------
