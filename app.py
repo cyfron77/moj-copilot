@@ -128,7 +128,7 @@ if st.button("🚀 Wykonaj Analizę Gemini dla tego waloru (Zrozumienie newsów 
         st.session_state.llm_results[ticker] = wynik_llm
         llm_data = wynik_llm
         
-        st.info("Dane sentymentu i fundamentów zostały zaktualizowane przez model Gemini.")
+        st.info("Dane sentymentu i fundamentów zostały wygenerowane na bazie wskaźników finansowych przez model Gemini.")
 
 # ---------------------------------------------------------
 # WERDYKT QUANT
@@ -164,7 +164,7 @@ with c_invest:
 st.info(f"**Uzasadnienie AI (Gemini):** {llm_data['uzasadnienie']}")
 
 # ---------------------------------------------------------
-# Zakładki Główne (Przywrócone wszystkie panele)
+# Zakładki Główne
 # ---------------------------------------------------------
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📈 Wykres Zaawansowany", 
@@ -203,29 +203,50 @@ with tab4:
     wyswietl_kalendarz_wynikow(ticker)
 
 with tab5:
-    st.subheader("⚖️ Kalkulator Pozycji i Ryzyka (oparty o ATR)")
+    st.subheader("⚖️ Inteligentny Kalkulator Pozycji (Sterowany Quant Modelem)")
+    st.caption("Kalkulator automatycznie dostosowuje kierunek zagrania (Long/Short) i odległość parametrów SL/TP do werdyktu modelu i zmienności rynku.")
+
+    # Wyciągamy kierunek z modelu swing (krótkoterminowego)
+    kierunek_long = werdykt["swing_score"] >= 0
+    
+    if kierunek_long:
+        st.markdown("### Kierunek transakcji: **KUPNO (LONG) 🟢**")
+    else:
+        st.markdown("### Kierunek transakcji: **SPRZEDAŻ (SHORT) 🔴**")
+
     mnoznik_atr = st.slider("Mnożnik ATR dla Stop Loss (Zalecane: 1.5x - 2.5x):", 1.0, 4.0, 2.0, 0.5)
-    sugerowany_sl = float(round(ostatnia_cena - (ostatni_atr * mnoznik_atr), 2))
-    sugerowany_tp = float(round(ostatnia_cena + (ostatni_atr * mnoznik_atr * 2.0), 2))
+    
+    # Logika odwróconych poziomów dla Long vs Short
+    if kierunek_long:
+        sugerowany_sl = float(round(ostatnia_cena - (ostatni_atr * mnoznik_atr), 2))
+        sugerowany_tp = float(round(ostatnia_cena + (ostatni_atr * mnoznik_atr * 2.0), 2))
+    else:
+        sugerowany_sl = float(round(ostatnia_cena + (ostatni_atr * mnoznik_atr), 2))
+        sugerowany_tp = float(round(ostatnia_cena - (ostatni_atr * mnoznik_atr * 2.0), 2))
 
     c_sl, c_tp = st.columns(2)
     sl = c_sl.number_input("Poziom Stop Loss (SL):", value=sugerowany_sl)
     tp = c_tp.number_input("Poziom Take Profit (TP):", value=sugerowany_tp)
+    
     roznica = abs(ostatnia_cena - sl)
 
     if roznica > 0:
         max_strata = kapital * (ryzyko_proc / 100)
-        pozycja = int(max_strata / roznica)
+        pozycja = int(max_strata / roznica) if roznica > 0 else 0
+        wartosc_pozycji = pozycja * ostatnia_cena
+        zysk_na_akcje = abs(tp - ostatnia_cena)
+        rr_ratio = zysk_na_akcje / roznica if roznica > 0 else 0
+
         st.success(
-            f"🎯 Parametry zlecenia:\n\n"
-            f"- Zalecana wielkość pozycji: **{pozycja}** sztuk\n"
-            f"- Łączna wartość transakcji: **{pozycja*ostatnia_cena:,.2f}**\n"
-            f"- Ryzyko kapitałowe (Max strata): **{max_strata:,.2f}**\n"
-            f"- Zysk do Ryzyka (R:R) = **1 : {(abs(tp-ostatnia_cena)/roznica):.2f}**\n"
-            f"- Zasięg bieżącej zmienności ATR: **{ostatni_atr:.2f}**"
+            f"🎯 **Zoptymalizowane parametry zlecenia:**\n\n"
+            f"- Zalecany Wolumen (liczba sztuk): **{pozycja}**\n"
+            f"- Łączna ekspozycja transakcji: **{wartosc_pozycji:,.2f}**\n"
+            f"- Ryzyko kapitałowe (Max strata na zleceniu): **{max_strata:,.2f}** (Zgodnie z Twoim limitem {ryzyko_proc}%)\n"
+            f"- Stosunek Zysku do Ryzyka (R:R) = **1 : {rr_ratio:.2f}**\n"
+            f"- Bieżący bufor zmienności ATR: **{ostatni_atr:.2f}**"
         )
     else:
-        st.warning("Stop Loss nie może być równy cenie.")
+        st.warning("Stop Loss nie może być równy bieżącej cenie.")
 
 with tab6:
     st.subheader("📓 Dziennik Transakcji")
