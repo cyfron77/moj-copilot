@@ -11,9 +11,10 @@ from modules.ai_engine import oblicz_werdykt_quant
 from modules.news_sentiment import pobierz_swieze_newsy, przetworz_sentyment
 from modules.journal import wczytaj_baze_aktywow, zapisz_baze_aktywow, wczytaj_dziennik, zapisz_w_dzienniku
 from modules.correlations import oblicz_korelacje_makro
-from modules.earnings import wyswietl_kalendarz_wynikow
+from modules.earnings import wyswietl_kalendarz_wynikow, pobierz_wyniki_tekst
 from modules.optimizer import optymalizuj_wagi, wczytaj_wagi
 from modules.gemini_llm import pobierz_ocene_llm
+from modules.fundamentals import pobierz_fundamenty_tekst
 
 # ---------------------------------------------------------
 # Konfiguracja
@@ -86,19 +87,27 @@ llm_data = st.session_state.llm_results.get(ticker, {"sentyment_score": 0.0, "fu
 
 if st.button("🚀 Wykonaj Analizę Gemini dla tego waloru (Zrozumienie newsów i fundamentów)"):
     with st.spinner("Gemini analizuje wiadomości i raporty finansowe..."):
-        # Pobranie surowych newsów jako tekst
+        # Pobranie newsów
         raw_news = pobierz_swieze_newsy(ticker, search_query)
         newsy_tekst = "\n".join([f"- {n['tytul']} ({n['zrodlo']})" for n in raw_news])
         
-        # Uproszczone dane fundamentalne tekstowe (w przyszłości do rozbudowy)
-        dane_fund = f"Aktualna cena: {ostatnia_cena}, RSI: {ostatni_rsi:.2f}. Oceń potencjał spółki na bazie dostępnych danych rynkowych."
+        # Pobranie TWARDYCH DANYCH z nowych modułów
+        fundamenty_tekst = pobierz_fundamenty_tekst(ticker)
+        wyniki_tekst = pobierz_wyniki_tekst(ticker)
+        
+        # Agregacja w jeden kontekst fundamentalny
+        dane_fund = (
+            f"--- BIEŻĄCA WYCENA I KONDYCJA ---\n{fundamenty_tekst}\n\n"
+            f"--- WERYFIKACJA CELÓW I WYNIKI (EPS) ---\n{wyniki_tekst}\n\n"
+            f"Dodatkowe informacje techniczne: Obecna cena to {ostatnia_cena}, RSI: {ostatni_rsi:.2f}. "
+            "Na podstawie tych wszystkich informacji, oceń stabilność i potencjał wzrostu spółki."
+        )
         
         wynik_llm = pobierz_ocene_llm(ticker, newsy_tekst, dane_fund)
         st.session_state.llm_results[ticker] = wynik_llm
         llm_data = wynik_llm
         
-        # Poinformowanie o wygenerowaniu danych
-        st.info("Dane sentymentu i fundamentów zostały wygenerowane przez model Gemini.")
+        st.info("Dane sentymentu i fundamentów zostały wygenerowane na bazie wskaźników finansowych przez model Gemini.")
 
 # ---------------------------------------------------------
 # WERDYKT QUANT (Krótki vs Długi termin)
