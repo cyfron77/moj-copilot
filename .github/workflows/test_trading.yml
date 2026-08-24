@@ -1,1 +1,25 @@
+name: Dev Sandbox - Trading 212 Demo
 
+on:
+  workflow_dispatch: # Pozwala na uruchomienie testu "z palca" w zakładce Actions w dowolnym momencie
+
+jobs:
+  test-trade:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pobranie kodu
+        uses: actions/checkout@v4
+
+      - name: Konfiguracja Pythona
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: Instalacja bibliotek
+        run: |
+          pip install requests pandas numpy
+
+      - name: Uruchomienie skryptu handlu demo
+        env:
+          T212_API_KEY: ${{ secrets.T212_API_KEY }}
+        run: python bot_trading_demo.py
