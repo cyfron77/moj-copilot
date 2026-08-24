@@ -14,10 +14,9 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
-
       - name: Instalacja bibliotek
         run: |
-        pip install requests pandas numpy yfinance feedparser textblob
+          pip install requests pandas numpy yfinance feedparser textblob
 
       - name: Uruchomienie skryptu handlu demo
         env:
