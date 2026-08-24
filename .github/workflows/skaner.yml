@@ -2,10 +2,11 @@ name: Auto Skaner Quant Model
 
 on:
   schedule:
-    # Skrypt będzie uruchamiał się od poniedziałku do piątku (1-5) 
-    # o 09:00 rano oraz 16:00 (czasu UTC, czyli ok. 10:00/11:00 i 17:00/18:00 czasu polskiego)
-    - cron: '0 9,16 * * 1-5'
-  workflow_dispatch: # To pozwala Ci kliknąć przycisk "Run workflow" ręcznie
+    # Skanowanie o 9:30 UTC (11:30 czasu polskiego) od poniedziałku do piątku
+    - cron: '30 7 * * 1-5'
+    # Skanowanie o 16:00 UTC (18:00 czasu polskiego) od poniedziałku do piątku
+    - cron: '0 14 * * 1-5'
+  workflow_dispatch: # Pozwala na ręczne uruchomienie przyciskiem w zakładce Actions
 
 jobs:
   skanuj:
