@@ -4,23 +4,24 @@ import requests
 import pandas as pd
 import numpy as np
 
-# Konfiguracja API Trading 212 (Środowisko Demo / Practice)
+# Konfiguracja API Trading 212 (Środowisko Demo)
 T212_API_KEY = os.getenv("T212_API_KEY")
+T212_API_SECRET = os.getenv("T212_API_SECRET")
 T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
 
-HEADERS = {
-    "Authorization": T212_API_KEY,
-    "Content-Type": "application/json"
-}
+# W Pythonie nie musimy ręcznie kodować Base64, biblioteka 'requests' robi to za nas w parametrze 'auth'
 
 def pobierz_stan_konta():
     """Moduł Ochrony Kapitału: sprawdza wolne środki i saldo konta demo"""
     url = f"{T212_BASE_URL}/account/cash"
     try:
-        response = requests.get(url, headers=HEADERS)
+        response = requests.get(url, auth=(T212_API_KEY, T212_API_SECRET))
         if response.status_code == 200:
             data = response.json()
             return data.get("free", 0.0), data.get("total", 0.0)
+        else:
+            print(f"❌ ODRZUCENIE Z SERWERA API! Kod błędu: {response.status_code}")
+            print(f"Treść odpowiedzi od brokera: {response.text}")
     except Exception as e:
         print(f"Błąd pobierania danych konta: {e}")
     return 0.0, 0.0
@@ -32,8 +33,10 @@ def otwórz_pozycje_demo(ticker, quantity):
         "quantity": quantity,
         "ticker": ticker
     }
-    response = requests.post(url, json=payload, headers=HEADERS)
+    response = requests.post(url, json=payload, auth=(T212_API_KEY, T212_API_SECRET))
     return response.status_code == 200, response.json()
+
+# ... (tutaj reszta kodu, funkcja uruchom_test_automatyzacji zostaje bez zmian) ...
 
 def uruchom_test_automatyzacji():
     print("🛡️ Uruchamiam testową wersję Copilota z integracją Trading 212 Demo...")
