@@ -52,7 +52,7 @@ def uruchom_test_automatyzacji():
     # Lista testowych aktywów powiązana z symbolami Trading 212
     aktywa_testowe = [
         {"nazwa": "NVIDIA", "ticker": "NVDA_US_EQ"},
-        {"nazwa": "Złoto", "ticker": "GOLD_US_CFD"}
+        {"nazwa": "PKOBP", "ticker": "PKO.WA"}
     ]
 
     for aktywo in aktywa_testowe:
