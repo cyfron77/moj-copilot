@@ -17,7 +17,7 @@ jobs:
 
       - name: Instalacja bibliotek
         run: |
-          pip install requests pandas numpy
+        pip install requests pandas numpy yfinance feedparser textblob
 
       - name: Uruchomienie skryptu handlu demo
         env:
