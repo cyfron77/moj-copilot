@@ -22,4 +22,5 @@ jobs:
       - name: Uruchomienie skryptu handlu demo
         env:
           T212_API_KEY: ${{ secrets.T212_API_KEY }}
+          T212_API_SECRET: ${{ secrets.T212_API_SECRET }}
         run: python bot_trading_demo.py
