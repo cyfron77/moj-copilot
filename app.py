@@ -204,10 +204,10 @@ else:
 
 if ostatni_macd > ostatni_macd_sig:
     punkty_bycze += 1
-    macd_opis = "MACD > Sygnał (Prowzrostowo)"
+    macd_opis = "MACD > Sygnał"
 else:
     punkty_niedzwiedzie += 1
-    macd_opis = "MACD < Sygnał (Porspadkowo)"
+    macd_opis = "MACD < Sygnał"
 
 if avg_sent > 0.05:
     punkty_bycze += 1
@@ -221,7 +221,7 @@ else:
 if punkty_bycze >= 3:
     werdykt_status = "MOCNY KANDYDAT NA LONGA (KUPNO)"
     werdykt_kolor = "success"
-    werdykt_komentarz = "Przewaga sygnałów prowzrostowych. Szukaj wejścia."
+    werdykt_komentarz = "Przewaga sygnałów prowzrostowych. Dobry moment na wejście."
 elif punkty_niedzwiedzie >= 3:
     werdykt_status = "OSTRZEŻENIE / KANDYDAT NA SHORTA"
     werdykt_kolor = "error"
@@ -360,7 +360,6 @@ with tab5:
             
     df_d = wczytaj_dziennik()
     if not df_d.empty:
-        # NOWA LOGIKA: Zawsze pokazujemy tabelę, nawet gdy nie ma statystyk!
         zamkniete = df_d[df_d['Status'] == 'Zamknięte'].copy()
         
         if not zamkniete.empty:
@@ -422,30 +421,40 @@ with tab6:
             col3.metric("Zainwestowane", f"{kasa.get('invested', 0):.2f}")
             col4.metric("Wynik (PnL)", f"{kasa.get('ppl', 0):.2f}")
             
-            st.markdown("### 📝 Aktualnie Otwarte Pozycje")
+            st.markdown("### 📝 Aktualnie Otwarte Pozycje przez Bota")
             if pozycje and isinstance(pozycje, list) and len(pozycje) > 0:
                 lista = []
                 for p in pozycje:
-                    # Inteligentna siatka - wyłapuje różne nazwy kluczy
-                    tckr = p.get('ticker') or p.get('instrument') or p.get('symbol') or p.get('code') or "Brak"
-                    qty = p.get('quantity') or p.get('size') or 0.0
-                    avg_p = p.get('averagePrice') or p.get('openPrice') or p.get('average_price') or 0.0
-                    cur_p = p.get('currentPrice') or p.get('current_price') or 0.0
-                    ppl = p.get('ppl') or p.get('profit') or p.get('unrealisedPnl') or p.get('unrealised_pnl') or 0.0
+                    # --- PRECYZYJNE MAPOWANIE Z ZAGNIEŻDŻONEJ ODPOWIEDZI API ---
+                    
+                    # 1. Ticker i Nazwa
+                    instr = p.get('instrument', {})
+                    tckr_raw = instr.get('ticker', 'N/A')
+                    nazwa_raw = instr.get('name', '')
+                    wyswietlany_ticker = f"{nazwa_raw} ({tckr_raw})" if nazwa_raw else tckr_raw
+                    
+                    # 2. Wolumen i Obecna Cena
+                    qty = float(p.get('quantity', 0.0))
+                    cur_p = float(p.get('currentPrice', 0.0))
+                    
+                    # 3. Średnia cena wejścia
+                    avg_p = float(p.get('averagePricePaid', 0.0))
+                    
+                    # 4. Zysk / Strata
+                    wallet = p.get('walletImpact', {})
+                    ppl = float(wallet.get('unrealizedProfitLoss', 0.0))
                     
                     lista.append({
-                        "Aktywo (Ticker)": str(tckr),
-                        "Kierunek": "LONG" if float(qty) > 0 else "SHORT",
-                        "Wolumen": abs(float(qty)),
-                        "Śr. Cena Wejścia": round(float(avg_p), 4),
-                        "Obecna Cena": round(float(cur_p), 4),
-                        "Zysk / Strata": round(float(ppl), 2)
+                        "Aktywo (Ticker)": wyswietlany_ticker,
+                        "Kierunek": "LONG" if qty > 0 else "SHORT",
+                        "Wolumen": abs(qty),
+                        "Śr. Cena Wejścia": round(avg_p, 4),
+                        "Obecna Cena": round(cur_p, 4),
+                        "Zysk / Strata": round(ppl, 2)
                     })
                 st.dataframe(pd.DataFrame(lista), use_container_width=True)
                 
-                # Ukryty moduł ratunkowy, jeśli tabela znów byłaby niekompletna
-                with st.expander("🛠️ Pokaż surowe dane z API (Otwórz, jeśli brakuje danych)"):
-                    st.info("Jeśli w tabeli wyżej wciąż widnieje 'Brak' lub '0' przy jakiejś wartości, rozwiń ten panel, zrób zrzut ekranu tych surowych kodów i wyślij mi go. Będę wiedział dokładnie, pod jaką nazwą schował to broker!")
+                with st.expander("🛠️ Pokaż surowe dane z API"):
                     st.json(pozycje)
             else:
                 st.info("Brak otwartych pozycji na platformie Trading 212.")
