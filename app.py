@@ -8,7 +8,6 @@ import feedparser
 from textblob import TextBlob
 from datetime import datetime
 import os
-import re
 import requests
 
 # Konfiguracja strony
@@ -25,7 +24,7 @@ except:
 T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
 
 st.title("🤖 AI Trading & Investment Copilot (DEV)")
-st.caption("Wersja testowa z modułem automatycznego tradingu i podglądem Trading 212 Live")
+st.caption("Środowisko testowe: Automatyczny bot + Podgląd Trading 212 Demo Live")
 
 # Predefiniowana baza aktywów
 popularne_aktywa = {
@@ -42,7 +41,7 @@ popularne_aktywa = {
 }
 
 # --- FUNKCJE DZIENNIKA TRANSAKCJI ---
-PLIK_DZIENNIKA = "dziennik_transakcji.csv"
+PLIK_DZIENNIKA = "dziennik_transakcji_dev.csv"
 
 def wczytaj_dziennik():
     if os.path.exists(PLIK_DZIENNIKA):
@@ -204,32 +203,32 @@ else:
 
 if ostatni_macd > ostatni_macd_sig:
     punkty_bycze += 1
-    macd_opis = "MACD > Sygnał (Prowzrostowo)"
+    macd_opis = "MACD > Sygnał"
 else:
     punkty_niedzwiedzie += 1
-    macd_opis = "MACD < Sygnał (Porspadkowo)"
+    macd_opis = "MACD < Sygnał"
 
 if avg_sent > 0.05:
     punkty_bycze += 1
-    sent_opis = "Pozytywny / Byczy"
+    sent_opis = "Pozytywny"
 elif avg_sent < -0.05:
     punkty_niedzwiedzie += 1
-    sent_opis = "Negatywny / Niedźwiedzi"
+    sent_opis = "Negatywny"
 else:
     sent_opis = "Neutralny"
 
 if punkty_bycze >= 3:
     werdykt_status = "MOCNY KANDYDAT NA LONGA (KUPNO)"
     werdykt_kolor = "success"
-    werdykt_komentarz = "Przewaga sygnałów prowzrostowych (Trend, MACD, Sentyment). Szukaj wejścia."
+    werdykt_komentarz = "Przewaga sygnałów prowzrostowych. Dobry moment na wejście."
 elif punkty_niedzwiedzie >= 3:
     werdykt_status = "OSTRZEŻENIE / KANDYDAT NA SHORTA"
     werdykt_kolor = "error"
-    werdykt_komentarz = "Przewaga sygnałów prospadkowych lub silnego przegrzania rynku."
+    werdykt_komentarz = "Przewaga sygnałów spadkowych."
 else:
     werdykt_status = "NEUTRALNY / OBSERWACJA"
     werdykt_kolor = "info"
-    werdykt_komentarz = "Rynek w konsolidacji lub sygnały są sprzeczne. Wstrzymaj się z decyzją."
+    werdykt_komentarz = "Sygnały sprzeczne. Wstrzymaj się."
 
 # --- GŁÓWNY PANEL GÓRNY ---
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -237,7 +236,7 @@ c1.metric("Ticker", ticker)
 c2.metric("Kurs", f"{ostatnia_cena:.2f}", f"{zmiana_proc:+.2f}%")
 c3.metric("RSI (14)", f"{ostatni_rsi:.1f}", rsi_opis)
 c4.metric("MACD Status", f"{ostatni_macd:.2f}", macd_opis)
-c5.metric("Zmienność ATR (14)", f"{ostatni_atr:.2f}", "Średni zasięg świecy")
+c5.metric("Zmienność ATR", f"{ostatni_atr:.2f}", "Średni zasięg")
 
 komunikat_werdyktu = f"🎯 **WERDYKT AI COPILOTA: {werdykt_status}**\n\n- {trend_opis} | {rsi_opis} | {macd_opis} | Sentyment: {sent_opis}\n- *{werdykt_komentarz}*"
 if werdykt_kolor == "success":
@@ -249,10 +248,10 @@ else:
 
 # --- ZAKŁADKI GŁÓWNE ---
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📈 Wykres (Wstęgi + MACD)", 
-    "🤖 Sentyment (AI)", 
+    "📈 Wykres", 
+    "🤖 Sentyment", 
     "⚖️ Kalkulator & ATR",
-    "🔍 Skaner Rynku",
+    "🔍 Skaner",
     "📓 Dziennik Transakcji",
     "📊 Portfel Live (T212)"
 ])
@@ -261,8 +260,7 @@ with tab1:
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.7, 0.3])
     
     fig.add_trace(go.Candlestick(
-        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
-        name="Świece"
+        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Świece"
     ), row=1, col=1)
     
     fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.2), name="SMA 20"), row=1, col=1)
@@ -275,29 +273,22 @@ with tab1:
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='cyan', width=1.5), name="MACD"), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='yellow', width=1.2), name="Sygnał MACD"), row=2, col=1)
     
-    fig.update_layout(
-        title=f"Analiza techniczna: {ticker}",
-        xaxis_rangeslider_visible=False,
-        height=620,
-        template="plotly_dark",
-        margin=dict(l=20, r=20, t=40, b=20)
-    )
+    fig.update_layout(title=f"Analiza techniczna: {ticker}", xaxis_rangeslider_visible=False, height=620, template="plotly_dark")
     st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.subheader("📰 Świeże wiadomości rynkowe (Real-Time)")
+    st.subheader("📰 Świeże wiadomości rynkowe")
     if news_items:
         for item in news_items:
             st.markdown(f"**[{item['tytul']}]({item['link']})**")
             st.caption(f"Sentyment: {item['status']} (`{item['score']:.2f}`) | Źródło: **{item['zrodlo']}** | Opublikowano: **{item['data']}**")
             st.write("---")
     else:
-        st.warning("Brak najnowszych wiadomości dla tego aktywa z ostatnich dni.")
+        st.warning("Brak najnowszych wiadomości.")
 
 with tab3:
-    st.subheader("⚖️ Inteligentny Kalkulator Pozycji i Ryzyka (Zmienność ATR)")
-    
-    mnoznik_atr = st.slider("Mnożnik ATR dla Stop Lossa (Zalecane: 1.5x - 2.5x):", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+    st.subheader("⚖️ Kalkulator Pozycji i Ryzyka (ATR)")
+    mnoznik_atr = st.slider("Mnożnik ATR dla Stop Lossa:", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
     sugerowany_sl_long = float(round(ostatnia_cena - (ostatni_atr * mnoznik_atr), 2))
     sugerowany_tp_long = float(round(ostatnia_cena + (ostatni_atr * mnoznik_atr * 2.0), 2))
     
@@ -316,10 +307,10 @@ with tab3:
         
         st.success(
             f"🎯 Parametry zlecenia:\n\n"
-            f"- Zalecana wielkość pozycji: **{rekomendowana_liczba}** sztuk / kontraktów\n"
+            f"- Zalecana wielkość pozycji: **{rekomendowana_liczba}** sztuk\n"
             f"- Łączna wartość transakcji: **{wartosc_pozycji:,.2f}**\n"
-            f"- Ryzyko kapitałowe (Max strata): **{max_strata_kwota:,.2f}** ({ryzyko_proc}%)\n"
-            f"- Stosunek Zysku do Ryzyka (Risk/Reward): **1 : {r_r:.2f}**"
+            f"- Maksymalna strata: **{max_strata_kwota:,.2f}** ({ryzyko_proc}%)\n"
+            f"- Stosunek Zysku do Ryzyka: **1 : {r_r:.2f}**"
         )
     else:
         st.warning("Stop Loss nie może być równy bieżącej cenie.")
@@ -336,148 +327,89 @@ with tab4:
                     cena = float(d_skan['Close'].iloc[-1])
                     rsi_val = float(d_skan['RSI'].iloc[-1]) if not pd.isna(d_skan['RSI'].iloc[-1]) else 50.0
                     sma50_val = float(d_skan['SMA50'].iloc[-1]) if not pd.isna(d_skan['SMA50'].iloc[-1]) else cena
-                    atr_val = float(d_skan['ATR'].iloc[-1]) if not pd.isna(d_skan['ATR'].iloc[-1]) else 0.0
                     trend = "🟢 Wzrostowy" if cena > sma50_val else "🔴 Spadkowy"
-                    
-                    if rsi_val < 35:
-                        stan_rsi = "🔥 Wyprzedanie (<35)"
-                    elif rsi_val > 70:
-                        stan_rsi = "⚠️ Wykupienie (>70)"
-                    else:
-                        stan_rsi = "Neutralne"
-                        
                     wyniki_skanera.append({
-                        "Aktywo": nazwa,
-                        "Ticker": sym,
-                        "Cena": f"{cena:.2f}",
-                        "RSI (14)": f"{rsi_val:.1f}",
-                        "Stan RSI": stan_rsi,
-                        "ATR": f"{atr_val:.2f}",
-                        "Trend (SMA50)": trend
+                        "Aktywo": nazwa, "Ticker": sym, "Cena": f"{cena:.2f}",
+                        "RSI (14)": f"{rsi_val:.1f}", "Trend (SMA50)": trend
                     })
-            
-            df_skaner = pd.DataFrame(wyniki_skanera)
-            st.dataframe(df_skaner, use_container_width=True)
+            st.dataframe(pd.DataFrame(wyniki_skanera), use_container_width=True)
 
 with tab5:
-    st.subheader("📓 Dziennik Transakcji (Trading Journal)")
-    
-    with st.form("szybki_dziennik_form"):
-        st.markdown("### ⚡ Szybkie dodanie wyniku")
-        c_q1, c_q2, c_q3 = st.columns(3)
-        q_aktywo = c_q1.text_input("Aktywo / Ticker:", value=ticker)
-        q_kierunek = c_q2.selectbox("Kierunek:", ["KUPNO (Long)", "SPRZEDAŻ (Short)"])
-        q_pnl = c_q3.number_input("Wynik netto:", value=0.0, format="%.2f", step=10.0)
+    st.subheader("📓 Dziennik Transakcji (DEV)")
+    with st.form("dziennik_dev_form"):
+        c1, c2, c3 = st.columns(3)
+        t_ak = c1.text_input("Aktywo / Ticker:", value=ticker)
+        t_kir = c2.selectbox("Kierunek:", ["KUPNO (Long)", "SPRZEDAŻ (Short)"])
+        t_wol = c3.number_input("Wolumen:", value=1.0)
         
-        submit_quick = st.form_submit_button("💾 Zapisz w dzienniku")
+        c4, c5, c6 = st.columns(3)
+        t_cen = c4.number_input("Cena Otwarcia:", value=ostatnia_cena, format="%.4f")
+        t_sta = c5.selectbox("Status:", ["Zamknięte", "Otwarte"])
+        t_pnl = c6.number_input("Wynik netto:", value=0.0, format="%.2f")
         
-        if submit_quick:
-            nowy_wpis = {
+        if st.form_submit_button("Zapisz w dzienniku"):
+            nowy = {
                 "Data": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "Aktywo": q_aktywo.upper(),
-                "Kierunek": q_kierunek,
-                "Wolumen": 1.0,
-                "Cena Otwarcia": ostatnia_cena,
-                "Status": "Zamknięte",
-                "Wynik": q_pnl
+                "Aktywo": t_ak.upper(), "Kierunek": t_kir, "Wolumen": t_wol,
+                "Cena Otwarcia": t_cen, "Status": t_sta, "Wynik": t_pnl
             }
-            zapisz_w_dzienniku(nowy_wpis)
-            st.success(f"✅ Dodano transakcję {q_aktywo.upper()} z wynikiem {q_pnl}!")
+            zapisz_w_dzienniku(nowy)
+            st.success("Zapisano!")
             st.rerun()
-                
-    st.markdown("---")
-    st.markdown("### 📊 Zaawansowane Statystyki i Krzywa Kapitału")
-    df_dziennik = wczytaj_dziennik()
-    
-    if not df_dziennik.empty:
-        zamkniete = df_dziennik[df_dziennik['Status'] == 'Zamknięte'].copy()
-        
-        if not zamkniete.empty:
-            zamkniete['Wynik'] = pd.to_numeric(zamkniete['Wynik'], errors='coerce')
             
-            total_trades = len(zamkniete)
-            zyskownych = len(zamkniete[zamkniete['Wynik'] > 0])
-            stratnych = len(zamkniete[zamkniete['Wynik'] <= 0])
-            win_rate = (zyskownych / total_trades) * 100 if total_trades > 0 else 0
-            suma_wynikow = zamkniete['Wynik'].sum()
-            
-            c_s1, c_s2, c_s3, c_s4 = st.columns(4)
-            c_s1.metric("Zamknięte pozycje", total_trades)
-            c_s2.metric("Skuteczność (Win Rate)", f"{win_rate:.1f}%")
-            c_s3.metric("Zysk / Strata", f"{zyskownych} / {stratnych}")
-            c_s4.metric("Całkowity Wynik (PnL)", f"{suma_wynikow:.2f}")
-            
-            zamkniete['Krzywa Kapitału'] = zamkniete['Wynik'].cumsum()
-            fig_eq = go.Figure()
-            fig_eq.add_trace(go.Scatter(
-                x=zamkniete['Data'], 
-                y=zamkniete['Krzywa Kapitału'], 
-                mode='lines+markers', 
-                name='Krzywa PnL', 
-                line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)
-            ))
-            fig_eq.update_layout(
-                title="Krzywa Zysków i Strat", 
-                template="plotly_dark", 
-                height=350,
-                margin=dict(l=20, r=20, t=40, b=20)
-            )
-            st.plotly_chart(fig_eq, use_container_width=True)
-            
-        st.markdown("### 📝 Pełna historia operacji")
-        st.dataframe(df_dziennik, use_container_width=True)
+    df_d = wczytaj_dziennik()
+    if not df_d.empty:
+        st.dataframe(df_d, use_container_width=True)
 
 with tab6:
     st.subheader("📊 Mój Portfel Live (Trading 212 Demo)")
-    st.caption("Podgląd Twojego wirtualnego konta i otwartych pozycji w czasie rzeczywistym.")
-    
     if not T212_KEY or not T212_SEC:
-        st.warning("⚠️ Brak kluczy API! Przejdź do ustawień aplikacji na Streamlit Cloud (Settings -> Secrets) i upewnij się, że dodałeś oba klucze.")
+        st.warning("⚠️ Brak kluczy API w Streamlit Secrets!")
     else:
         if st.button("🔄 Odśwież dane portfela"):
             st.cache_data.clear()
             
-        @st.cache_data(ttl=60)
-        def pobierz_portfel(k, s):
+        @st.cache_data(ttl=30)
+        def pobierz_portfel_t212(k, s):
             try:
                 c = requests.get(f"{T212_BASE_URL}/account/cash", auth=(k, s))
                 p = requests.get(f"{T212_BASE_URL}/positions", auth=(k, s))
                 if c.status_code == 200 and p.status_code == 200:
                     return c.json(), p.json()
-            except Exception as e:
-                return None, None
+            except:
+                pass
             return None, None
             
-        with st.spinner("Łączenie z serwerami Trading 212..."):
-            kasa, pozycje = pobierz_portfel(T212_KEY, T212_SEC)
-            
+        kasa, pozycje = pobierz_portfel_t212(T212_KEY, T212_SEC)
+        
         if kasa is not None:
-            wolne = kasa.get("free", 0.0)
-            zainwestowane = kasa.get("invested", 0.0)
-            wynik = kasa.get("ppl", 0.0)
-            total = kasa.get("total", 0.0)
-            
             col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Wycena Portfela", f"{total:.2f}")
-            col2.metric("Wolne Środki", f"{wolne:.2f}")
-            col3.metric("Zainwestowane", f"{zainwestowane:.2f}")
-            col4.metric("Niezrealizowany Wynik (PnL)", f"{wynik:.2f}", f"{wynik:+.2f}")
+            col1.metric("Wycena Portfela", f"{kasa.get('total', 0):.2f}")
+            col2.metric("Wolne Środki", f"{kasa.get('free', 0):.2f}")
+            col3.metric("Zainwestowane", f"{kasa.get('invested', 0):.2f}")
+            col4.metric("Wynik (PnL)", f"{kasa.get('ppl', 0):.2f}")
             
-            st.markdown("### 📝 Aktualnie Otwarte Pozycje przez Bota")
-            if pozycje and len(pozycje) > 0:
-                lista_pozycji = []
+            st.markdown("### 📝 Aktualnie Otwarte Pozycje")
+            if pozycje:
+                lista = []
                 for p in pozycje:
-                    lista_pozycji.append({
-                        "Aktywo (Ticker)": p.get("ticker", ""),
-                        "Kierunek": "LONG" if p.get("quantity", 0) > 0 else "SHORT",
-                        "Wolumen": p.get("quantity", 0),
-                        "Śr. Cena Wejścia": round(p.get("averagePrice", 0), 4),
-                        "Obecna Cena": round(p.get("currentPrice", 0), 4),
-                        "Zysk / Strata": round(p.get("ppl", 0), 2)
+                    # Wyciągamy poprawnie klucze z oficjalnej odpowiedzi Trading 212 API
+                    tckr = p.get('ticker', 'N/A')
+                    qty = p.get('quantity', 0)
+                    avg_p = p.get('averagePrice', 0)
+                    cur_p = p.get('currentPrice', 0)
+                    ppl = p.get('ppl', 0)
+                    
+                    lista.append({
+                        "Aktywo (Ticker)": tckr,
+                        "Kierunek": "LONG" if qty > 0 else "SHORT",
+                        "Wolumen": abs(qty),
+                        "Śr. Cena Wejścia": round(avg_p, 2),
+                        "Obecna Cena": round(cur_p, 2),
+                        "Zysk / Strata": round(ppl, 2)
                     })
-                df_poz = pd.DataFrame(lista_pozycji)
-                st.dataframe(df_poz, use_container_width=True)
+                st.dataframe(pd.DataFrame(lista), use_container_width=True)
             else:
-                st.info("Brak otwartych pozycji na koncie Demo Trading 212.")
+                st.info("Brak otwartych pozycji.")
         else:
-            st.error("❌ Nie udało się pobrać danych z Trading 212. Upewnij się, że klucze są wklejone poprawnie i należą do konta INVEST.")
+            st.error("Błąd pobierania danych z API Trading 212.")
