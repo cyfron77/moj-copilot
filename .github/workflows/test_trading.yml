@@ -27,4 +27,6 @@ jobs:
         env:
           T212_API_KEY: ${{ secrets.T212_API_KEY }}
           T212_API_SECRET: ${{ secrets.T212_API_SECRET }}
+          TG_TOKEN_DEV: ${{ secrets.TG_TOKEN_DEV }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python bot_trading_demo.py
