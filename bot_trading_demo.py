@@ -14,9 +14,24 @@ T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
 
 # Mapa aktywów: Ticker dla API brokera -> Ticker dla Yahoo Finance
 aktywa_do_handlu = {
+    # --- GIGANCI TECHNOLOGICZNI ---
     "NVIDIA": {"t212": "NVDA_US_EQ", "yf": "NVDA", "search": "NVIDIA stock news"},
     "Apple": {"t212": "AAPL_US_EQ", "yf": "AAPL", "search": "Apple stock market news"},
-    "Microsoft": {"t212": "MSFT_US_EQ", "yf": "MSFT", "search": "Microsoft stock news"}
+    "Microsoft": {"t212": "MSFT_US_EQ", "yf": "MSFT", "search": "Microsoft stock news"},
+    "Tesla": {"t212": "TSLA_US_EQ", "yf": "TSLA", "search": "Tesla stock market news"},
+    "Alphabet (Google)": {"t212": "GOOGL_US_EQ", "yf": "GOOGL", "search": "Google stock market news"},
+    "Amazon": {"t212": "AMZN_US_EQ", "yf": "AMZN", "search": "Amazon stock market news"},
+    "Meta (Facebook)": {"t212": "META_US_EQ", "yf": "META", "search": "Meta Facebook stock news"},
+    
+    # --- FINANSE I TRADYCYJNY BIZNES ---
+    "JPMorgan": {"t212": "JPM_US_EQ", "yf": "JPM", "search": "JPMorgan stock market news"},
+    "Visa": {"t212": "V_US_EQ", "yf": "V", "search": "Visa stock market news"},
+    "Coca-Cola": {"t212": "KO_US_EQ", "yf": "KO", "search": "Coca Cola stock news"},
+    "Disney": {"t212": "DIS_US_EQ", "yf": "DIS", "search": "Disney stock news"},
+    
+    # --- SZEROKIE ETF-Y (Spokojniejszy trend) ---
+    "S&P 500 ETF": {"t212": "SPY_US_EQ", "yf": "SPY", "search": "S&P 500 index market today"},
+    "Nasdaq 100 ETF": {"t212": "QQQ_US_EQ", "yf": "QQQ", "search": "Nasdaq 100 ETF market"}
 }
 
 def pobierz_stan_konta():
