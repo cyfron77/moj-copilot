@@ -12,6 +12,27 @@ T212_API_KEY = os.getenv("T212_API_KEY")
 T212_API_SECRET = os.getenv("T212_API_SECRET")
 T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
 
+# Konfiguracja Telegrama dla środowiska DEV
+TG_TOKEN = os.getenv("TG_TOKEN_DEV")
+TG_CHAT_ID = os.getenv("TG_CHAT_ID")
+
+def wyslij_telegram(wiadomosc):
+    if not TG_TOKEN or not TG_CHAT_ID:
+        print("⚠️ Brak skonfigurowanych kluczy Telegram dla DEV.")
+        return False
+    url = f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": TG_CHAT_ID,
+        "text": wiadomosc,
+        "parse_mode": "Markdown"
+    }
+    try:
+        response = requests.post(url, json=payload)
+        return response.status_code == 200
+    except Exception as e:
+        print(f"Błąd wysyłania Telegrama: {e}")
+        return False
+
 # Mapa aktywów: Ticker dla API brokera -> Ticker dla Yahoo Finance
 aktywa_do_handlu = {
     # --- GIGANCI TECHNOLOGICZNI ---
@@ -29,7 +50,7 @@ aktywa_do_handlu = {
     "Coca-Cola": {"t212": "KO_US_EQ", "yf": "KO", "search": "Coca Cola stock news"},
     "Disney": {"t212": "DIS_US_EQ", "yf": "DIS", "search": "Disney stock news"},
     
-    # --- SZEROKIE ETF-Y (Spokojniejszy trend) ---
+    # --- SZEROKIE ETF-Y ---
     "S&P 500 ETF": {"t212": "SPY_US_EQ", "yf": "SPY", "search": "S&P 500 index market today"},
     "Nasdaq 100 ETF": {"t212": "QQQ_US_EQ", "yf": "QQQ", "search": "Nasdaq 100 ETF market"}
 }
@@ -115,14 +136,13 @@ def uruchom_automatyzacje():
         print("❌ Brak wystarczających wolnych środków.")
         return
 
-    # Pobieranie orientacyjnego kursu USD/PLN dla kalkulatora
     try:
         df_usd = yf.download("USDPLN=X", period="1d", progress=False)
         if isinstance(df_usd.columns, pd.MultiIndex):
             df_usd.columns = df_usd.columns.get_level_values(0)
         kurs_usd_pln = float(df_usd['Close'].iloc[-1])
     except:
-        kurs_usd_pln = 4.0 # Wartość awaryjna, jeśli pobieranie zawiedzie
+        kurs_usd_pln = 4.0
         
     print(f"💱 Aktualny kurs USD/PLN pobrany przez bota: {kurs_usd_pln:.4f}")
 
@@ -133,25 +153,32 @@ def uruchom_automatyzacje():
         if sygnal:
             print(f"🟢 MOCNY SYGNAŁ KUPNA DLA {nazwa}!")
             
-            # KALKULATOR RYZYKA (TERAZ UWZGLĘDNIA WALUTY!)
-            ryzyko_max_pln = total_capital * 0.015 # Max 1.5% kapitału (w PLN)
-            ryzyko_max_usd = ryzyko_max_pln / kurs_usd_pln # Przeliczenie ryzyka na USD
-            
+            ryzyko_max_pln = total_capital * 0.015
+            ryzyko_max_usd = ryzyk_max_usd_val = ryzyko_max_pln / kurs_usd_pln
             roznica_sl_usd = atr_usd * 2.0
             
-            wolumen = max(1, int(ryzyko_max_usd / roznica_sl_usd))
+            wolumen = max(1, int(ryzyk_max_usd_val / roznica_sl_usd))
             szacowany_koszt_usd = wolumen * cena_usd
             szacowany_koszt_pln = szacowany_koszt_usd * kurs_usd_pln
             
             if szacowany_koszt_pln > free_cash:
-                print(f"⛔ Blokada kapitału: Szacowany koszt pozycji ({szacowany_koszt_pln:.2f} PLN) przewyższa wolne środki ({free_cash:.2f} PLN).")
+                print(f"⛔ Blokada kapitału: Szacowany koszt ({szacowany_koszt_pln:.2f} PLN) przewyższa gotówkę.")
                 continue
                 
-            print(f"✅ Kalkulacja OK. Zlecenie na {wolumen} sztuk (Szacowany koszt: {szacowany_koszt_usd:.2f} USD / {szacowany_koszt_pln:.2f} PLN).")
+            print(f"✅ Kalkulacja OK. Zlecenie na {wolumen} sztuk.")
             sukces, wynik = otwórz_pozycje_demo(info["t212"], wolumen)
             
             if sukces:
-                print(f"🚀 SUKCES: Wysłano zlecenie! Status z API: {wynik.get('status')}")
+                print(f"🚀 SUKCES: Wysłano zlecenie! Status: {wynik.get('status')}")
+                # Wysłanie powiadomienia na dedykowany kanał Telegram DEV
+                wiada = (
+                    f"🤖 *Copilot DEV (Trading 212)*\n\n"
+                    f"✅ *Otwarto nową pozycję!รายการ*\n"
+                    f"- Aktywo: *{nazwa}* (`{info['t212']}`)\n"
+                    f"- Wolumen: `{wolumen}` szt.\n"
+                    f"- Szacowany koszt: `{szacowany_koszt_usd:.2f} USD` (`{szacowany_koszt_pln:.2f} PLN`)"
+                )
+                wyslij_telegram(wiada)
             else:
                 print(f"❌ Odrzucono zlecenie: {wynik}")
         else:
