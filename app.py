@@ -8,6 +8,7 @@ import feedparser
 from textblob import TextBlob
 from datetime import datetime
 import os
+import re
 import requests
 
 # Konfiguracja strony
@@ -24,7 +25,7 @@ except:
 T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
 
 st.title("🤖 AI Trading & Investment Copilot (DEV)")
-st.caption("Środowisko testowe: Automatyczny bot + Podgląd Trading 212 Demo Live")
+st.caption("Wersja testowa z modułem automatycznego tradingu i podglądem Trading 212 Live")
 
 # Predefiniowana baza aktywów
 popularne_aktywa = {
@@ -203,10 +204,10 @@ else:
 
 if ostatni_macd > ostatni_macd_sig:
     punkty_bycze += 1
-    macd_opis = "MACD > Sygnał"
+    macd_opis = "MACD > Sygnał (Prowzrostowo)"
 else:
     punkty_niedzwiedzie += 1
-    macd_opis = "MACD < Sygnał"
+    macd_opis = "MACD < Sygnał (Porspadkowo)"
 
 if avg_sent > 0.05:
     punkty_bycze += 1
@@ -220,7 +221,7 @@ else:
 if punkty_bycze >= 3:
     werdykt_status = "MOCNY KANDYDAT NA LONGA (KUPNO)"
     werdykt_kolor = "success"
-    werdykt_komentarz = "Przewaga sygnałów prowzrostowych. Dobry moment na wejście."
+    werdykt_komentarz = "Przewaga sygnałów prowzrostowych. Szukaj wejścia."
 elif punkty_niedzwiedzie >= 3:
     werdykt_status = "OSTRZEŻENIE / KANDYDAT NA SHORTA"
     werdykt_kolor = "error"
@@ -359,7 +360,39 @@ with tab5:
             
     df_d = wczytaj_dziennik()
     if not df_d.empty:
+        # NOWA LOGIKA: Zawsze pokazujemy tabelę, nawet gdy nie ma statystyk!
+        zamkniete = df_d[df_d['Status'] == 'Zamknięte'].copy()
+        
+        if not zamkniete.empty:
+            zamkniete['Wynik'] = pd.to_numeric(zamkniete['Wynik'], errors='coerce').fillna(0)
+            total_trades = len(zamkniete)
+            zyskownych = len(zamkniete[zamkniete['Wynik'] > 0])
+            stratnych = len(zamkniete[zamkniete['Wynik'] <= 0])
+            win_rate = (zyskownych / total_trades) * 100 if total_trades > 0 else 0
+            suma_wynikow = zamkniete['Wynik'].sum()
+            
+            c_s1, c_s2, c_s3, c_s4 = st.columns(4)
+            c_s1.metric("Zamknięte pozycje", total_trades)
+            c_s2.metric("Skuteczność (Win Rate)", f"{win_rate:.1f}%")
+            c_s3.metric("Zysk / Strata", f"{zyskownych} / {stratnych}")
+            c_s4.metric("Całkowity Wynik (PnL)", f"{suma_wynikow:.2f}")
+            
+            zamkniete['Krzywa Kapitału'] = zamkniete['Wynik'].cumsum()
+            fig_eq = go.Figure()
+            fig_eq.add_trace(go.Scatter(
+                x=zamkniete['Data'], y=zamkniete['Krzywa Kapitału'], 
+                mode='lines+markers', name='Krzywa PnL', 
+                line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)
+            ))
+            fig_eq.update_layout(title="Krzywa Zysków i Strat", template="plotly_dark", height=350)
+            st.plotly_chart(fig_eq, use_container_width=True)
+        else:
+            st.info("Brak **zamkniętych** pozycji do wyliczenia statystyk i krzywej kapitału.")
+            
+        st.markdown("### 📝 Pełna historia operacji (Otwarte i Zamknięte)")
         st.dataframe(df_d, use_container_width=True)
+    else:
+        st.info("Twój dziennik jest na razie całkowicie pusty.")
 
 with tab6:
     st.subheader("📊 Mój Portfel Live (Trading 212 Demo)")
@@ -390,26 +423,31 @@ with tab6:
             col4.metric("Wynik (PnL)", f"{kasa.get('ppl', 0):.2f}")
             
             st.markdown("### 📝 Aktualnie Otwarte Pozycje")
-            if pozycje:
+            if pozycje and isinstance(pozycje, list) and len(pozycje) > 0:
                 lista = []
                 for p in pozycje:
-                    # Wyciągamy poprawnie klucze z oficjalnej odpowiedzi Trading 212 API
-                    tckr = p.get('ticker', 'N/A')
-                    qty = p.get('quantity', 0)
-                    avg_p = p.get('averagePrice', 0)
-                    cur_p = p.get('currentPrice', 0)
-                    ppl = p.get('ppl', 0)
+                    # Inteligentna siatka - wyłapuje różne nazwy kluczy
+                    tckr = p.get('ticker') or p.get('instrument') or p.get('symbol') or p.get('code') or "Brak"
+                    qty = p.get('quantity') or p.get('size') or 0.0
+                    avg_p = p.get('averagePrice') or p.get('openPrice') or p.get('average_price') or 0.0
+                    cur_p = p.get('currentPrice') or p.get('current_price') or 0.0
+                    ppl = p.get('ppl') or p.get('profit') or p.get('unrealisedPnl') or p.get('unrealised_pnl') or 0.0
                     
                     lista.append({
-                        "Aktywo (Ticker)": tckr,
-                        "Kierunek": "LONG" if qty > 0 else "SHORT",
-                        "Wolumen": abs(qty),
-                        "Śr. Cena Wejścia": round(avg_p, 2),
-                        "Obecna Cena": round(cur_p, 2),
-                        "Zysk / Strata": round(ppl, 2)
+                        "Aktywo (Ticker)": str(tckr),
+                        "Kierunek": "LONG" if float(qty) > 0 else "SHORT",
+                        "Wolumen": abs(float(qty)),
+                        "Śr. Cena Wejścia": round(float(avg_p), 4),
+                        "Obecna Cena": round(float(cur_p), 4),
+                        "Zysk / Strata": round(float(ppl), 2)
                     })
                 st.dataframe(pd.DataFrame(lista), use_container_width=True)
+                
+                # Ukryty moduł ratunkowy, jeśli tabela znów byłaby niekompletna
+                with st.expander("🛠️ Pokaż surowe dane z API (Otwórz, jeśli brakuje danych)"):
+                    st.info("Jeśli w tabeli wyżej wciąż widnieje 'Brak' lub '0' przy jakiejś wartości, rozwiń ten panel, zrób zrzut ekranu tych surowych kodów i wyślij mi go. Będę wiedział dokładnie, pod jaką nazwą schował to broker!")
+                    st.json(pozycje)
             else:
-                st.info("Brak otwartych pozycji.")
+                st.info("Brak otwartych pozycji na platformie Trading 212.")
         else:
-            st.error("Błąd pobierania danych z API Trading 212.")
+            st.error("Błąd połączenia. Odśwież stronę lub sprawdź klucze API.")
