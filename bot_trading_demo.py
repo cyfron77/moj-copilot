@@ -61,6 +61,24 @@ def pobierz_stan_konta():
         print(f"Błąd konta: {e}")
     return 0.0, 0.0
 
+# --- NOWOŚĆ: Pobieranie listy aktualnie posiadanych aktywów ---
+def pobierz_otwarte_pozycje():
+    url = f"{T212_BASE_URL}/positions"
+    try:
+        response = requests.get(url, auth=(T212_API_KEY, T212_API_SECRET))
+        if response.status_code == 200:
+            pozycje = response.json()
+            otwarte_tickery = []
+            if isinstance(pozycje, list):
+                for p in pozycje:
+                    tckr = p.get('ticker') or p.get('instrument', {}).get('ticker')
+                    if tckr:
+                        otwarte_tickery.append(tckr)
+            return otwarte_tickery
+    except Exception as e:
+        print(f"Błąd pobierania pozycji: {e}")
+    return []
+
 def otwórz_pozycje_demo(ticker, quantity):
     url = f"{T212_BASE_URL}/orders/market"
     payload = {"quantity": quantity, "ticker": ticker}
@@ -141,27 +159,32 @@ def uruchom_automatyzacje():
         
     print(f"💱 Aktualny kurs USD/PLN pobrany przez bota: {kurs_usd_pln:.4f}")
 
+    # Pobieramy listę już otwartych pozycji, by uniknąć duplikatów
+    posiadane_aktywa = pobierz_otwarte_pozycje()
+    print(f"📂 Aktualnie posiadane tickery w portfelu: {posiadane_aktywa}")
+
     for nazwa, info in aktywa_do_handlu.items():
         print(f"\nSkupiam się na: {nazwa}...")
+        
+        # --- BLOKADA DUPLIKATÓW ---
+        if info["t212"] in posiadane_aktywa:
+            print(f"🟡 POMINIĘCIE: Masz już otwartą pozycję na {nazwa} ({info['t212']}). Szukam dalej w celu dywersyfikacji.")
+            continue
+            
         sygnal, cena_usd, atr_usd = analizuj_aktywo(nazwa, info["yf"], info["search"])
         
         if sygnal:
             print(f"🟢 MOCNY SYGNAŁ KUPNA DLA {nazwa}!")
             
-            # --- ZMODYFIKOWANY SYSTEM RYZYKA (BLOKADA 10%) ---
-            
-            # 1. Wyliczenie z tytułu ryzyka na Stop Loss (max 1.5%)
             ryzyko_max_pln = total_capital * 0.015
             ryzyko_max_usd = ryzyko_max_pln / kurs_usd_pln
             roznica_sl_usd = atr_usd * 2.0
             liczba_z_ryzyka = int(ryzyko_max_usd / roznica_sl_usd) if roznica_sl_usd > 0 else 0
             
-            # 2. Wyliczenie z tytułu twardej blokady kapitału (max 10%)
             max_kapital_na_pozycje_pln = total_capital * 0.10
             max_kapital_na_pozycje_usd = max_kapital_na_pozycje_pln / kurs_usd_pln
             liczba_z_kapitalu = int(max_kapital_na_pozycje_usd / cena_usd) if cena_usd > 0 else 0
             
-            # 3. Bot wybiera zawsze bezpieczniejszy wolumen
             wolumen = min(liczba_z_ryzyka, liczba_z_kapitalu)
             
             if wolumen < 1:
@@ -181,7 +204,6 @@ def uruchom_automatyzacje():
             if sukces:
                 print(f"🚀 SUKCES: Wysłano zlecenie! Status: {wynik.get('status')}")
                 
-                # Dodatkowa adnotacja do powiadomienia, jeśli zadziałała blokada
                 notatka_blokady = ""
                 if wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka:
                     notatka_blokady = "\n⚠️ _Zadziałała blokada 10% kapitału_"
