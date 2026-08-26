@@ -35,18 +35,44 @@ T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
 st.title("🤖 AI Trading & Investment Copilot (DEV)")
 st.caption("Wersja testowa: Automatyczny bot, podgląd T212, Blokada 10% i silnik FinBERT AI.")
 
-# Predefiniowana baza aktywów
+# --- ROZBUDOWANA BAZA AKTYWÓW ---
 popularne_aktywa = {
-    "NVIDIA (NVDA)": {"ticker": "NVDA", "search_term": "NVIDIA stock news"},
+    # --- USA: TOPOWE SPÓŁKI TECHNOLOGICZNE I FINANSOWE ---
     "Apple (AAPL)": {"ticker": "AAPL", "search_term": "Apple stock market news"},
     "Microsoft (MSFT)": {"ticker": "MSFT", "search_term": "Microsoft stock news"},
-    "Tesla (TSLA)": {"ticker": "TSLA", "search_term": "Tesla stock market news"},
-    "Alphabet (Google)": {"ticker": "GOOGL", "search_term": "Google stock market news"},
+    "NVIDIA (NVDA)": {"ticker": "NVDA", "search_term": "NVIDIA stock news"},
+    "Alphabet / Google (GOOGL)": {"ticker": "GOOGL", "search_term": "Google stock market news"},
     "Amazon (AMZN)": {"ticker": "AMZN", "search_term": "Amazon stock market news"},
-    "Meta (META)": {"ticker": "META", "search_term": "Meta Facebook stock news"},
-    "Coca-Cola (KO)": {"ticker": "KO", "search_term": "Coca Cola stock news"},
-    "S&P 500 ETF (SPY)": {"ticker": "SPY", "search_term": "S&P 500 index market today"},
-    "Nasdaq 100 ETF (QQQ)": {"ticker": "QQQ", "search_term": "Nasdaq 100 ETF market"}
+    "Meta / Facebook (META)": {"ticker": "META", "search_term": "Meta Facebook stock news"},
+    "Tesla (TSLA)": {"ticker": "TSLA", "search_term": "Tesla stock market news"},
+    "Broadcom (AVGO)": {"ticker": "AVGO", "search_term": "Broadcom stock news"},
+    "JPMorgan (JPM)": {"ticker": "JPM", "search_term": "JPMorgan stock market news"},
+    "Visa (V)": {"ticker": "V", "search_term": "Visa stock market news"},
+    "Walmart (WMT)": {"ticker": "WMT", "search_term": "Walmart stock news"},
+
+    # --- GPW: TOPOWE SPÓŁKI (WIG20) ---
+    "PKO BP (PKO.WA)": {"ticker": "PKO.WA", "search_term": "PKO BP bank gielda GPW"},
+    "Orlen (ORL.WA)": {"ticker": "ORL.WA", "search_term": "Orlen gielda GPW"},
+    "CD Projekt (CDR.WA)": {"ticker": "CDR.WA", "search_term": "CD Projekt gielda akcje"},
+    "PZU (PZU.WA)": {"ticker": "PZU.WA", "search_term": "PZU gielda GPW"},
+    "Dino Polska (DNP.WA)": {"ticker": "DNP.WA", "search_term": "Dino Polska gielda GPW"},
+    "KGHM (KGH.WA)": {"ticker": "KGH.WA", "search_term": "KGHM miedz gielda GPW"},
+    "Allegro (ALE.WA)": {"ticker": "ALE.WA", "search_term": "Allegro gielda GPW"},
+    "LPP (LPP.WA)": {"ticker": "LPP.WA", "search_term": "LPP gielda GPW"},
+    "Bank Pekao (PEO.WA)": {"ticker": "PEO.WA", "search_term": "Bank Pekao gielda GPW"},
+    "mBank (MBK.WA)": {"ticker": "MBK.WA", "search_term": "mBank gielda GPW"},
+
+    # --- TOP 10 ETF / ETN NA ŚWIECIE ---
+    "S&P 500 ETF (SPY)": {"ticker": "SPY", "search_term": "S&P 500 ETF news"},
+    "Nasdaq 100 ETF (QQQ)": {"ticker": "QQQ", "search_term": "Nasdaq 100 ETF news"},
+    "Vanguard Total World (VT)": {"ticker": "VT", "search_term": "Vanguard Total World Stock ETF"},
+    "Vanguard All-World (VWCE.DE)": {"ticker": "VWCE.DE", "search_term": "VWCE ETF market news"},
+    "Emerging Markets ETF (VWO)": {"ticker": "VWO", "search_term": "Emerging markets ETF news"},
+    "Dividend ETF (SCHD)": {"ticker": "SCHD", "search_term": "Schwab Dividend ETF news"},
+    "Gold Trust ETF (GLD)": {"ticker": "GLD", "search_term": "SPDR Gold Trust ETF news"},
+    "20+ Year Treasury Bonds (TLT)": {"ticker": "TLT", "search_term": "iShares 20+ Year Treasury Bond ETF"},
+    "Real Estate REITs (VNQ)": {"ticker": "VNQ", "search_term": "Vanguard Real Estate ETF"},
+    "ARK Innovation (ARKK)": {"ticker": "ARKK", "search_term": "ARK Innovation ETF news"}
 }
 
 # --- FUNKCJE DZIENNIKA TRANSAKCJI ---
