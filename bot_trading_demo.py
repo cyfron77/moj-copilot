@@ -119,12 +119,9 @@ def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
     response = requests.post(url, json=payload, auth=(T212_API_KEY, T212_API_SECRET))
     return response.status_code == 200, response.json()
 
-# --- NOWOŚĆ: Filtr Szerokiego Rynku (Indeks S&P 500) ---
 def analizuj_szeroki_rynek():
-    # Pobieramy ETF na S&P 500 (SPY) jako reprezentację giełdy w USA
     df = yf.download("SPY", period="3mo", interval="1d", progress=False)
     if df is None or df.empty:
-        # W przypadku błędu pobierania, domyślnie zezwalamy na handel
         return True, 0.0, 0.0
         
     if isinstance(df.columns, pd.MultiIndex):
@@ -134,11 +131,29 @@ def analizuj_szeroki_rynek():
     ostatnia_cena = float(df['Close'].iloc[-1])
     sma50 = float(df['SMA50'].iloc[-1])
     
-    # Zwraca True, jeśli S&P 500 jest powyżej swojej SMA50
     rynek_rosnie = ostatnia_cena > sma50
     return rynek_rosnie, ostatnia_cena, sma50
 
 def analizuj_aktywo(nazwa, symbol_yf, query):
+    # --- NOWOŚĆ: MULTI-TIMEFRAME ANALYSIS (Trend Tygodniowy 1W) ---
+    df_wk = yf.download(symbol_yf, period="2y", interval="1wk", progress=False)
+    trend_tygodniowy_rosnacy = True # Wartość domyślna
+    
+    if df_wk is not None and not df_wk.empty:
+        if isinstance(df_wk.columns, pd.MultiIndex):
+            df_wk.columns = df_wk.columns.get_level_values(0)
+        df_wk['SMA50'] = df_wk['Close'].rolling(window=50).mean()
+        
+        # Weryfikacja na podstawie długoterminowej SMA50 (ok. roku)
+        if not pd.isna(df_wk['SMA50'].iloc[-1]):
+            trend_tygodniowy_rosnacy = float(df_wk['Close'].iloc[-1]) > float(df_wk['SMA50'].iloc[-1])
+        else:
+            # Fallback dla krótszej historii
+            df_wk['SMA20'] = df_wk['Close'].rolling(window=20).mean()
+            if not pd.isna(df_wk['SMA20'].iloc[-1]):
+                trend_tygodniowy_rosnacy = float(df_wk['Close'].iloc[-1]) > float(df_wk['SMA20'].iloc[-1])
+
+    # --- Standardowa Analiza Dzienna (1D) ---
     df = yf.download(symbol_yf, period="3mo", interval="1d", progress=False)
     if df is None or df.empty:
         return False, 0.0, 0.0, ""
@@ -191,14 +206,25 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     if macd_val > macd_sig: punkty_bycze += 1
     if avg_sent > 0.05: punkty_bycze += 1
 
-    print(f"[{nazwa}] Trend: {'UP' if ostatnia_cena>sma50 else 'DOWN'} | RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedźwiedzi'} | Sentyment: {avg_sent:.2f} ({silnik})")
+    # Podgląd w logach z uwzględnieniem trendu 1W
+    trend_1w_status = 'UP' if trend_tygodniowy_rosnacy else 'DOWN'
+    trend_1d_status = 'UP' if ostatnia_cena > sma50 else 'DOWN'
+    macd_status = 'Byczy' if macd_val > macd_sig else 'Niedźwiedzi'
+    
+    print(f"[{nazwa}] Trend 1D: {trend_1d_status} | Trend 1W: {trend_1w_status} | RSI: {rsi:.1f} | MACD: {macd_status} | Sentyment: {avg_sent:.2f} ({silnik})")
     
     if punkty_bycze >= 3:
-        return True, ostatnia_cena, float(atr), silnik
+        # Zderzenie sygnału dziennego z trendem tygodniowym
+        if trend_tygodniowy_rosnacy:
+            return True, ostatnia_cena, float(atr), silnik
+        else:
+            print(f"🛑 ZIGNOROWANO SYGNAŁ (Multi-Timeframe): Dzienny sygnał kupna odrzucony - długoterminowy trend tygodniowy (1W) jest SPADKOWY.")
+            return False, ostatnia_cena, float(atr), silnik
+            
     return False, ostatnia_cena, float(atr), silnik
 
 def uruchom_automatyzacje():
-    print("🛡️ Uruchamiam bota (FinBERT AI + Quant Model + T212 API)...")
+    print("🛡️ Uruchamiam bota (Multi-Timeframe + FinBERT + S&P500 Filter + T212 API)...")
     free_cash, total_capital = pobierz_stan_konta()
     print(f"💰 Wolne środki: {free_cash:.2f} PLN | Całkowity kapitał: {total_capital:.2f} PLN")
     
@@ -216,7 +242,6 @@ def uruchom_automatyzacje():
         
     print(f"💱 Aktualny kurs USD/PLN pobrany przez bota: {kurs_usd_pln:.4f}")
 
-    # --- KONTROLA SZEROKIEGO RYNKU ---
     print("\n🌎 Analizuję stan szerokiego rynku (Indeks S&P 500)...")
     rynek_rosnie, spy_cena, spy_sma50 = analizuj_szeroki_rynek()
     
@@ -239,9 +264,8 @@ def uruchom_automatyzacje():
         sygnal, cena_usd, atr_usd, uzyty_silnik = analizuj_aktywo(nazwa, info["yf"], info["search"])
         
         if sygnal:
-            print(f"🟢 MOCNY SYGNAŁ KUPNA DLA {nazwa}!")
+            print(f"🟢 POTWIERDZONY SYGNAŁ KUPNA DLA {nazwa}!")
             
-            # Weryfikacja blokady z szerokiego rynku
             if not rynek_rosnie:
                 print(f"🛑 ZIGNOROWANO ZAKUP: System odrzucił wejście w {nazwa}, ponieważ S&P 500 znajduje się w trendzie spadkowym.")
                 continue
@@ -297,7 +321,7 @@ def uruchom_automatyzacje():
             else:
                 print(f"❌ Odrzucono zlecenie: {wynik}")
         else:
-            print(f"🟡 Brak idealnych warunków dla {nazwa}. Czekam.")
+            print(f"🟡 Czekam na lepsze warunki dla {nazwa}.")
 
 if __name__ == "__main__":
     uruchom_automatyzacje()
