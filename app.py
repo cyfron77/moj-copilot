@@ -170,9 +170,10 @@ def pobierz_swieze_newsy(symbol, query):
     return news_list
 
 # --- INTELIGENTNA BRAMKA FinBERT (Z Fallbackiem) ---
+# --- INTELIGENTNA BRAMKA FinBERT (Z Raportowaniem Silnika) ---
 def analizuj_sentyment_finbert(tytuly, token):
     if not token or not tytuly:
-        return [TextBlob(t).sentiment.polarity for t in tytuly]
+        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Brak tokenu)"
     
     url = "https://api-inference.huggingface.co/models/ProsusAI/finbert"
     headers = {"Authorization": f"Bearer {token}"}
@@ -190,14 +191,14 @@ def analizuj_sentyment_finbert(tytuly, token):
                     scores.append(-najlepszy['score'])
                 else:
                     scores.append(0.0)
-            return scores
+            return scores, "FinBERT (HuggingFace API 🟢)"
         elif response.status_code == 503:
-            st.toast("⚠️ Model FinBERT się ładuje (Zapasowy TextBlob w użyciu).", icon="⏳")
-            return [TextBlob(t).sentiment.polarity for t in tytuly]
+            st.toast("⚠️ Model FinBERT wybudza się z uśpienia. Użyto zapasowego TextBlob.", icon="⏳")
+            return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (FinBERT 503 - Wybudzanie)"
         else:
-            return [TextBlob(t).sentiment.polarity for t in tytuly]
-    except Exception:
-        return [TextBlob(t).sentiment.polarity for t in tytuly]
+            return [TextBlob(t).sentiment.polarity for t in tytuly], f"TextBlob (Błąd API: {response.status_code})"
+    except Exception as e:
+        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Błąd połączenia)"
 
 # --- GŁÓWNY PANEL GÓRNY (Surowe Metryki) ---
 c1, c2, c3, c4, c5 = st.columns(5)
