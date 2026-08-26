@@ -16,6 +16,9 @@ T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
 TG_TOKEN = os.getenv("TG_TOKEN_DEV")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 
+# Konfiguracja Hugging Face (FinBERT)
+HF_TOKEN = os.getenv("HF_API_TOKEN")
+
 def wyslij_telegram(wiadomosc):
     if not TG_TOKEN or not TG_CHAT_ID:
         print("⚠️ Brak skonfigurowanych kluczy Telegram dla DEV.")
@@ -32,6 +35,35 @@ def wyslij_telegram(wiadomosc):
     except Exception as e:
         print(f"Błąd wysyłania Telegrama: {e}")
         return False
+
+# --- BRAMKA FINBERT DLA BOTA ---
+def analizuj_sentyment_finbert(tytuly, token):
+    if not token or not tytuly:
+        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Brak klucza)"
+    
+    url = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
+    headers = {"Authorization": f"Bearer {token}"}
+    
+    try:
+        response = requests.post(url, headers=headers, json={"inputs": tytuly}, timeout=15)
+        if response.status_code == 200:
+            wyniki = response.json()
+            scores = []
+            for res in wyniki:
+                najlepszy = max(res, key=lambda x: x['score'])
+                if najlepszy['label'] == 'positive':
+                    scores.append(najlepszy['score'])
+                elif najlepszy['label'] == 'negative':
+                    scores.append(-najlepszy['score'])
+                else:
+                    scores.append(0.0)
+            return scores, "FinBERT 🧠"
+        elif response.status_code == 503:
+            return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (FinBERT 503)"
+        else:
+            return [TextBlob(t).sentiment.polarity for t in tytuly], f"TextBlob (Błąd {response.status_code})"
+    except Exception as e:
+        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Błąd połączenia)"
 
 # Mapa aktywów: Ticker dla API brokera -> Ticker dla Yahoo Finance
 aktywa_do_handlu = {
@@ -78,7 +110,6 @@ def pobierz_otwarte_pozycje():
         print(f"Błąd pobierania pozycji: {e}")
     return []
 
-# --- NOWOŚĆ: Funkcja zlecenia przyjmuje teraz ceny Stop Loss i Take Profit ---
 def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
     url = f"{T212_BASE_URL}/orders/market"
     payload = {
@@ -126,11 +157,16 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     clean_q = query.replace(" ", "+")
     rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=en-US&gl=US&ceid=US:en"
     feed = feedparser.parse(rss_url)
-    sentymenty = []
+    
+    # --- POBRANIE SENTYMENTU PRZEZ FINBERT ---
+    tytuly_newsow = []
     if feed.entries:
         for entry in feed.entries[:5]:
-            polaryzacja = TextBlob(entry.title).sentiment.polarity
-            sentymenty.append(polaryzacja)
+            tytuly_newsow.append(entry.title)
+            
+    sentymenty_wartosci, silnik = analizuj_sentyment_finbert(tytuly_newsow, HF_TOKEN)
+    
+    sentymenty = [float(val) for val in sentymenty_wartosci]
     avg_sent = sum(sentymenty) / len(sentymenty) if sentymenty else 0.0
 
     punkty_bycze = 0
@@ -139,14 +175,14 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     if macd_val > macd_sig: punkty_bycze += 1
     if avg_sent > 0.05: punkty_bycze += 1
 
-    print(f"[{nazwa}] Trend: {'UP' if ostatnia_cena>sma50 else 'DOWN'} | RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedźwiedzi'} | Sentyment: {avg_sent:.2f}")
+    print(f"[{nazwa}] Trend: {'UP' if ostatnia_cena>sma50 else 'DOWN'} | RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedźwiedzi'} | Sentyment: {avg_sent:.2f} ({silnik})")
     
     if punkty_bycze >= 3:
-        return True, ostatnia_cena, float(atr)
-    return False, ostatnia_cena, float(atr)
+        return True, ostatnia_cena, float(atr), silnik
+    return False, ostatnia_cena, float(atr), silnik
 
 def uruchom_automatyzacje():
-    print("🛡️ Uruchamiam zaawansowanego bota (Quant Model + T212 API)...")
+    print("🛡️ Uruchamiam bota (FinBERT AI + Quant Model + T212 API)...")
     free_cash, total_capital = pobierz_stan_konta()
     print(f"💰 Wolne środki: {free_cash:.2f} PLN | Całkowity kapitał: {total_capital:.2f} PLN")
     
@@ -174,12 +210,11 @@ def uruchom_automatyzacje():
             print(f"🟡 POMINIĘCIE: Masz już otwartą pozycję na {nazwa} ({info['t212']}). Szukam dalej.")
             continue
             
-        sygnal, cena_usd, atr_usd = analizuj_aktywo(nazwa, info["yf"], info["search"])
+        sygnal, cena_usd, atr_usd, uzyty_silnik = analizuj_aktywo(nazwa, info["yf"], info["search"])
         
         if sygnal:
             print(f"🟢 MOCNY SYGNAŁ KUPNA DLA {nazwa}!")
             
-            # Limity i wielkość pozycji
             ryzyko_max_pln = total_capital * 0.015
             ryzyko_max_usd = ryzyko_max_pln / kurs_usd_pln
             roznica_sl_usd = atr_usd * 2.0
@@ -202,13 +237,11 @@ def uruchom_automatyzacje():
                 print(f"⛔ Blokada kapitału: Szacowany koszt ({szacowany_koszt_pln:.2f} PLN) przewyższa wolne środki.")
                 continue
             
-            # --- NOWOŚĆ: Wyliczanie absolutnych poziomów SL i TP ---
             poziom_sl = cena_usd - roznica_sl_usd
-            poziom_tp = cena_usd + (roznica_sl_usd * 2.0) # Take Profit 2x większy niż ryzyko (R:R 1:2)
+            poziom_tp = cena_usd + (roznica_sl_usd * 2.0)
                 
             print(f"✅ Zlecenie: {wolumen} sztuk | SL: {poziom_sl:.2f}$ | TP: {poziom_tp:.2f}$")
             
-            # Wysłanie zlecenia powiązanego do Trading 212
             sukces, wynik = otwórz_pozycje_demo(info["t212"], wolumen, poziom_sl, poziom_tp)
             
             if sukces:
@@ -225,7 +258,8 @@ def uruchom_automatyzacje():
                     f"- Wolumen: `{wolumen}` szt.\n"
                     f"- Koszt: ok. `{szacowany_koszt_usd:.2f} USD`\n"
                     f"- 🛑 Stop Loss: `{poziom_sl:.2f} USD`\n"
-                    f"- 🎯 Take Profit: `{poziom_tp:.2f} USD`"
+                    f"- 🎯 Take Profit: `{poziom_tp:.2f} USD`\n"
+                    f"🧠 Analiza NLP: _{uzyty_silnik}_\n"
                     f"{notatka_blokady}"
                 )
                 wyslij_telegram(wiada)
