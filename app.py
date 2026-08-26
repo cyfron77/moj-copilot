@@ -288,8 +288,10 @@ with tab2:
         st.warning("Brak najnowszych wiadomości.")
 
 with tab3:
-    st.subheader("⚖️ Kalkulator Pozycji i Ryzyka (ATR)")
-    mnoznik_atr = st.slider("Mnożnik ATR dla Stop Lossa:", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+    st.subheader("⚖️ Inteligentny Kalkulator Pozycji i Ryzyka (Zmienność ATR)")
+    st.caption("Kalkulator automatycznie dopasowuje SL do zmienności (ATR) oraz blokuje zaangażowanie powyżej 10% kapitału.")
+    
+    mnoznik_atr = st.slider("Mnożnik ATR dla Stop Lossa (Zalecane: 1.5x - 2.5x):", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
     sugerowany_sl_long = float(round(ostatnia_cena - (ostatni_atr * mnoznik_atr), 2))
     sugerowany_tp_long = float(round(ostatnia_cena + (ostatni_atr * mnoznik_atr * 2.0), 2))
     
@@ -301,20 +303,40 @@ with tab3:
     
     roznica_sl = abs(ostatnia_cena - stop_loss)
     if roznica_sl > 0:
+        # 1. Wyliczenie z tytułu ryzyka SL (np. max 1.5% straty)
         max_strata_kwota = kapital * (ryzyko_proc / 100)
-        rekomendowana_liczba = int(max_strata_kwota / roznica_sl)
+        liczba_z_ryzyka = int(max_strata_kwota / roznica_sl)
+        
+        # 2. NOWE: Wyliczenie z tytułu twardej blokady kapitału (max 10% zaangażowania)
+        max_wartosc_kapitalu = kapital * 0.10
+        liczba_z_kapitalu = int(max_wartosc_kapitalu / ostatnia_cena)
+        
+        # 3. Ostateczna rekomendacja to ZAWSZE wartość mniejsza
+        rekomendowana_liczba = min(liczba_z_ryzyka, liczba_z_kapitalu)
+        
+        # Przeliczenie faktycznych wartości dla wybranej, bezpiecznej ilości sztuk
         wartosc_pozycji = rekomendowana_liczba * ostatnia_cena
+        faktyczne_ryzyko_kwota = rekomendowana_liczba * roznica_sl
+        faktyczne_ryzyko_proc = (faktyczne_ryzyko_kwota / kapital) * 100
         r_r = abs(take_profit - ostatnia_cena) / roznica_sl
+        
+        # Ostrzeżenie wizualne, jeśli zadziałała nasza nowa blokada kapitałowa
+        komunikat_blokady = ""
+        if rekomendowana_liczba == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka:
+            komunikat_blokady = "\n\n⚠️ *Uwaga: Zadziałała blokada kapitałowa. Zmniejszono pozycję do max. 10% Twojego portfela, aby uniknąć zamrożenia środków w trendzie bocznym.*"
         
         st.success(
             f"🎯 Parametry zlecenia:\n\n"
             f"- Zalecana wielkość pozycji: **{rekomendowana_liczba}** sztuk\n"
-            f"- Łączna wartość transakcji: **{wartosc_pozycji:,.2f}**\n"
-            f"- Maksymalna strata: **{max_strata_kwota:,.2f}** ({ryzyko_proc}%)\n"
-            f"- Stosunek Zysku do Ryzyka: **1 : {r_r:.2f}**"
+            f"- Łączna wartość transakcji: **{wartosc_pozycji:,.2f}** (Max 10% portfela)\n"
+            f"- Faktyczne ryzyko (strata na SL): **{faktyczne_ryzyko_kwota:,.2f}** ({faktyczne_ryzyko_proc:.2f}%)\n"
+            f"- Stosunek Zysku do Ryzyka (Risk/Reward): **1 : {r_r:.2f}**\n"
+            f"- Bieżąca zmienność ATR (14): **{ostatni_atr:.2f}**"
+            f"{komunikat_blokady}"
         )
     else:
         st.warning("Stop Loss nie może być równy bieżącej cenie.")
+        
 
 with tab4:
     st.subheader("🔍 Skaner Okazji Rynkowych")
