@@ -8,11 +8,14 @@ import feedparser
 from textblob import TextBlob
 from datetime import datetime
 import os
-import re
 import requests
 
 # Konfiguracja strony
 st.set_page_config(page_title="AI Trading Copilot Pro (DEV)", layout="wide", page_icon="📈")
+
+# Inicjalizacja pamięci podręcznej (Zamrożenie analizy AI)
+if 'ai_data' not in st.session_state:
+    st.session_state.ai_data = None
 
 # --- POBIERANIE KLUCZY API Z SECRETS ---
 try:
@@ -25,7 +28,7 @@ except:
 T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
 
 st.title("🤖 AI Trading & Investment Copilot (DEV)")
-st.caption("Wersja testowa z modułem automatycznego tradingu i podglądem Trading 212 Live")
+st.caption("Wersja testowa: Automatyczny bot w tle, podgląd Trading 212 i optymalizacja stanu AI.")
 
 # Predefiniowana baza aktywów
 popularne_aktywa = {
@@ -129,8 +132,7 @@ ostatni_macd = float(df['MACD'].iloc[-1]) if not pd.isna(df['MACD'].iloc[-1]) el
 ostatni_macd_sig = float(df['MACD_Signal'].iloc[-1]) if not pd.isna(df['MACD_Signal'].iloc[-1]) else 0.0
 ostatni_atr = float(df['ATR'].iloc[-1]) if not pd.isna(df['ATR'].iloc[-1]) else (ostatnia_cena * 0.02)
 
-# --- MODUŁ POBIERANIA WIADOMOŚCI ---
-@st.cache_data(ttl=300)
+# --- MODUŁ POBIERANIA WIADOMOŚCI (Używany tylko na żądanie) ---
 def pobierz_swieze_newsy(symbol, query):
     news_list = []
     try:
@@ -162,90 +164,97 @@ def pobierz_swieze_newsy(symbol, query):
                 })
     return news_list
 
-surowe_newsy = pobierz_swieze_newsy(ticker, search_query)
-sentymenty = []
-news_items = []
-
-for item in surowe_newsy:
-    analiza = TextBlob(item["tytul"])
-    polaryzacja = analiza.sentiment.polarity
-    sentymenty.append(polaryzacja)
-    kolor = "🟢 Pozytywny" if polaryzacja > 0.05 else ("🔴 Negatywny" if polaryzacja < -0.05 else "⚪ Neutralny")
-    news_items.append({
-        "tytul": item["tytul"],
-        "score": polaryzacja,
-        "status": kolor,
-        "data": item["data"],
-        "zrodlo": item["zrodlo"],
-        "link": item["link"]
-    })
-
-avg_sent = sum(sentymenty) / len(sentymenty) if sentymenty else 0.0
-
-# --- ROZBUDOWANY SILNIK DECYZYJNY ---
-punkty_bycze = 0
-punkty_niedzwiedzie = 0
-
-if ostatnia_cena > ostatnie_sma50:
-    punkty_bycze += 1
-    trend_opis = "Trend wzrostowy (Cena > SMA50)"
-else:
-    punkty_niedzwiedzie += 1
-    trend_opis = "Trend spadkowy (Cena < SMA50)"
-
-if ostatni_rsi < 35:
-    punkty_bycze += 1
-    rsi_opis = "Wyprzedanie (RSI < 35)"
-elif ostatni_rsi > 70:
-    punkty_niedzwiedzie += 1
-    rsi_opis = "Wykupienie (RSI > 70)"
-else:
-    rsi_opis = "RSI Neutralny"
-
-if ostatni_macd > ostatni_macd_sig:
-    punkty_bycze += 1
-    macd_opis = "MACD > Sygnał"
-else:
-    punkty_niedzwiedzie += 1
-    macd_opis = "MACD < Sygnał"
-
-if avg_sent > 0.05:
-    punkty_bycze += 1
-    sent_opis = "Pozytywny"
-elif avg_sent < -0.05:
-    punkty_niedzwiedzie += 1
-    sent_opis = "Negatywny"
-else:
-    sent_opis = "Neutralny"
-
-if punkty_bycze >= 3:
-    werdykt_status = "MOCNY KANDYDAT NA LONGA (KUPNO)"
-    werdykt_kolor = "success"
-    werdykt_komentarz = "Przewaga sygnałów prowzrostowych. Dobry moment na wejście."
-elif punkty_niedzwiedzie >= 3:
-    werdykt_status = "OSTRZEŻENIE / KANDYDAT NA SHORTA"
-    werdykt_kolor = "error"
-    werdykt_komentarz = "Przewaga sygnałów spadkowych."
-else:
-    werdykt_status = "NEUTRALNY / OBSERWACJA"
-    werdykt_kolor = "info"
-    werdykt_komentarz = "Sygnały sprzeczne. Wstrzymaj się."
-
-# --- GŁÓWNY PANEL GÓRNY ---
+# --- GŁÓWNY PANEL GÓRNY (Surowe Metryki) ---
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Ticker", ticker)
 c2.metric("Kurs", f"{ostatnia_cena:.2f}", f"{zmiana_proc:+.2f}%")
-c3.metric("RSI (14)", f"{ostatni_rsi:.1f}", rsi_opis)
-c4.metric("MACD Status", f"{ostatni_macd:.2f}", macd_opis)
-c5.metric("Zmienność ATR", f"{ostatni_atr:.2f}", "Średni zasięg")
+c3.metric("RSI (14)", f"{ostatni_rsi:.1f}")
+c4.metric("MACD", f"{ostatni_macd:.2f}")
+c5.metric("ATR (14)", f"{ostatni_atr:.2f}")
 
-komunikat_werdyktu = f"🎯 **WERDYKT AI COPILOTA: {werdykt_status}**\n\n- {trend_opis} | {rsi_opis} | {macd_opis} | Sentyment: {sent_opis}\n- *{werdykt_komentarz}*"
-if werdykt_kolor == "success":
-    st.success(komunikat_werdyktu)
-elif werdykt_kolor == "error":
-    st.error(komunikat_werdyktu)
+st.markdown("---")
+
+# --- ZAMROŻONY WERDYKT AI (State Management) ---
+verdict_placeholder = st.empty()
+
+if st.button("🔄 Odśwież Werdykt (Analiza AI)"):
+    with st.spinner(f"Analizuję wiadomości i układ sił dla {ticker}..."):
+        surowe_newsy = pobierz_swieze_newsy(ticker, search_query)
+        sentymenty = []
+        news_items = []
+        for item in surowe_newsy:
+            analiza = TextBlob(item["tytul"])
+            polaryzacja = analiza.sentiment.polarity
+            sentymenty.append(polaryzacja)
+            kolor = "🟢 Pozytywny" if polaryzacja > 0.05 else ("🔴 Negatywny" if polaryzacja < -0.05 else "⚪ Neutralny")
+            news_items.append({
+                "tytul": item["tytul"], "score": polaryzacja, "status": kolor, 
+                "data": item["data"], "zrodlo": item["zrodlo"], "link": item["link"]
+            })
+        avg_sent = sum(sentymenty) / len(sentymenty) if sentymenty else 0.0
+
+        punkty_bycze = 0
+        punkty_niedzwiedzie = 0
+
+        if ostatnia_cena > ostatnie_sma50:
+            punkty_bycze += 1; t_opis = "Trend wzrostowy (Cena > SMA50)"
+        else:
+            punkty_niedzwiedzie += 1; t_opis = "Trend spadkowy (Cena < SMA50)"
+
+        if ostatni_rsi < 35:
+            punkty_bycze += 1; r_opis = "Wyprzedanie (RSI < 35)"
+        elif ostatni_rsi > 70:
+            punkty_niedzwiedzie += 1; r_opis = "Wykupienie (RSI > 70)"
+        else:
+            r_opis = "RSI Neutralny"
+
+        if ostatni_macd > ostatni_macd_sig:
+            punkty_bycze += 1; m_opis = "MACD > Sygnał (Prowzrostowo)"
+        else:
+            punkty_niedzwiedzie += 1; m_opis = "MACD < Sygnał (Porspadkowo)"
+
+        if avg_sent > 0.05:
+            punkty_bycze += 1; s_opis = "Pozytywny"
+        elif avg_sent < -0.05:
+            punkty_niedzwiedzie += 1; s_opis = "Negatywny"
+        else:
+            s_opis = "Neutralny"
+
+        if punkty_bycze >= 3:
+            w_stat = "MOCNY KANDYDAT NA LONGA (KUPNO)"
+            w_kolor = "success"
+            w_kom = "Przewaga sygnałów prowzrostowych. Szukaj wejścia."
+        elif punkty_niedzwiedzie >= 3:
+            w_stat = "OSTRZEŻENIE / KANDYDAT NA SHORTA"
+            w_kolor = "error"
+            w_kom = "Przewaga sygnałów spadkowych lub silne przegrzanie rynku."
+        else:
+            w_stat = "NEUTRALNY / OBSERWACJA"
+            w_kolor = "info"
+            w_kom = "Sygnały sprzeczne. Wstrzymaj się z decyzją."
+
+        # Zapisz do pamięci podręcznej (Zamrożenie)
+        st.session_state.ai_data = {
+            'ticker': ticker, 'trend_opis': t_opis, 'rsi_opis': r_opis, 
+            'macd_opis': m_opis, 'sent_opis': s_opis, 'werdykt_status': w_stat, 
+            'werdykt_kolor': w_kolor, 'werdykt_komentarz': w_kom, 
+            'news_items': news_items, 'avg_sent': avg_sent, 
+            'czas': datetime.now().strftime("%H:%M:%S")
+        }
+
+# Wyświetlanie aktualnego stanu werdyktu
+if st.session_state.ai_data:
+    d = st.session_state.ai_data
+    komunikat = f"🎯 **WERDYKT AI COPILOTA: {d['werdykt_status']}** (dla {d['ticker']})\n\n- {d['trend_opis']} | {d['rsi_opis']} | {d['macd_opis']} | Sentyment: {d['sent_opis']}\n- *{d['werdykt_komentarz']}*\n*(Ostatnia analiza: {d['czas']})*"
+    
+    if d['werdykt_kolor'] == "success":
+        verdict_placeholder.success(komunikat)
+    elif d['werdykt_kolor'] == "error":
+        verdict_placeholder.error(komunikat)
+    else:
+        verdict_placeholder.info(komunikat)
 else:
-    st.info(komunikat_werdyktu)
+    verdict_placeholder.info("🤖 **System gotowy.** Kliknij przycisk poniżej, aby wygenerować świeżą analizę AI.")
 
 # --- ZAKŁADKI GŁÓWNE ---
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
@@ -274,38 +283,38 @@ with tab1:
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='cyan', width=1.5), name="MACD"), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='yellow', width=1.2), name="Sygnał MACD"), row=2, col=1)
     
-    fig.update_layout(
-        title=f"Analiza techniczna: {ticker}", 
-        xaxis_rangeslider_visible=False, 
-        height=620, 
-        template="plotly_dark",
-        margin=dict(l=20, r=20, t=40, b=20)
-    )
-    
-    # --- NOWOŚĆ: Usuwanie pustych luk (weekendów) z wykresu ---
+    # Usuwanie pustych luk z weekendów
     fig.update_xaxes(
         rangebreaks=[
-            dict(bounds=["sat", "mon"]) # Ukrywa czas od soboty do poniedziałku
+            dict(bounds=["sat", "mon"])
         ]
     )
     
+    fig.update_layout(title=f"Analiza techniczna: {ticker}", xaxis_rangeslider_visible=False, height=620, template="plotly_dark", margin=dict(l=20, r=20, t=40, b=20))
     st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.subheader("📰 Świeże wiadomości rynkowe")
-    if news_items:
-        for item in news_items:
-            st.markdown(f"**[{item['tytul']}]({item['link']})**")
-            st.caption(f"Sentyment: {item['status']} (`{item['score']:.2f}`) | Źródło: **{item['zrodlo']}** | Opublikowano: **{item['data']}**")
-            st.write("---")
+    st.subheader("📰 Świeże wiadomości rynkowe i Sentyment")
+    if st.session_state.ai_data:
+        d = st.session_state.ai_data
+        st.caption(f"Wyświetlam wyniki zamrożone dla: **{d['ticker']}** (Aktualizacja: {d['czas']})")
+        if d['ticker'] != ticker:
+            st.warning(f"⚠️ Uwaga: Poniższe wiadomości dotyczą aktywa **{d['ticker']}**. Jeśli chcesz pobrać newsy dla **{ticker}**, kliknij przycisk 'Odśwież Werdykt' powyżej.")
+        
+        if d['news_items']:
+            for item in d['news_items']:
+                st.markdown(f"**[{item['tytul']}]({item['link']})**")
+                st.caption(f"Sentyment: {item['status']} (`{item['score']:.2f}`) | Źródło: **{item['zrodlo']}** | Opublikowano: **{item['data']}**")
+                st.write("---")
+        else:
+            st.warning("Brak najnowszych wiadomości z ostatnich dni.")
     else:
-        st.warning("Brak najnowszych wiadomości.")
+        st.info("Kliknij przycisk 'Odśwież Werdykt' w głównym panelu, aby pobrać wiadomości i ocenić sentyment.")
 
 with tab3:
-    st.subheader("⚖️ Inteligentny Kalkulator Pozycji i Ryzyka (Zmienność ATR)")
-    st.caption("Kalkulator automatycznie dopasowuje SL do zmienności (ATR) oraz blokuje zaangażowanie powyżej 10% kapitału.")
+    st.subheader("⚖️ Inteligentny Kalkulator Pozycji (ATR & Blokada 10%)")
     
-    mnoznik_atr = st.slider("Mnożnik ATR dla Stop Lossa (Zalecane: 1.5x - 2.5x):", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+    mnoznik_atr = st.slider("Mnożnik ATR dla Stop Lossa:", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
     sugerowany_sl_long = float(round(ostatnia_cena - (ostatni_atr * mnoznik_atr), 2))
     sugerowany_tp_long = float(round(ostatnia_cena + (ostatni_atr * mnoznik_atr * 2.0), 2))
     
@@ -317,40 +326,34 @@ with tab3:
     
     roznica_sl = abs(ostatnia_cena - stop_loss)
     if roznica_sl > 0:
-        # 1. Wyliczenie z tytułu ryzyka SL (np. max 1.5% straty)
+        # Kalkulacja z limitami bezpieczeństwa
         max_strata_kwota = kapital * (ryzyko_proc / 100)
         liczba_z_ryzyka = int(max_strata_kwota / roznica_sl)
         
-        # 2. NOWE: Wyliczenie z tytułu twardej blokady kapitału (max 10% zaangażowania)
         max_wartosc_kapitalu = kapital * 0.10
         liczba_z_kapitalu = int(max_wartosc_kapitalu / ostatnia_cena)
         
-        # 3. Ostateczna rekomendacja to ZAWSZE wartość mniejsza
         rekomendowana_liczba = min(liczba_z_ryzyka, liczba_z_kapitalu)
         
-        # Przeliczenie faktycznych wartości dla wybranej, bezpiecznej ilości sztuk
         wartosc_pozycji = rekomendowana_liczba * ostatnia_cena
         faktyczne_ryzyko_kwota = rekomendowana_liczba * roznica_sl
         faktyczne_ryzyko_proc = (faktyczne_ryzyko_kwota / kapital) * 100
         r_r = abs(take_profit - ostatnia_cena) / roznica_sl
         
-        # Ostrzeżenie wizualne, jeśli zadziałała nasza nowa blokada kapitałowa
         komunikat_blokady = ""
         if rekomendowana_liczba == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka:
-            komunikat_blokady = "\n\n⚠️ *Uwaga: Zadziałała blokada kapitałowa. Zmniejszono pozycję do max. 10% Twojego portfela, aby uniknąć zamrożenia środków w trendzie bocznym.*"
+            komunikat_blokady = "\n\n⚠️ *Uwaga: Zadziałała blokada kapitałowa. Zmniejszono pozycję do max. 10% portfela, aby uniknąć zamrożenia środków.*"
         
         st.success(
             f"🎯 Parametry zlecenia:\n\n"
             f"- Zalecana wielkość pozycji: **{rekomendowana_liczba}** sztuk\n"
-            f"- Łączna wartość transakcji: **{wartosc_pozycji:,.2f}** (Max 10% portfela)\n"
-            f"- Faktyczne ryzyko (strata na SL): **{faktyczne_ryzyko_kwota:,.2f}** ({faktyczne_ryzyko_proc:.2f}%)\n"
-            f"- Stosunek Zysku do Ryzyka (Risk/Reward): **1 : {r_r:.2f}**\n"
-            f"- Bieżąca zmienność ATR (14): **{ostatni_atr:.2f}**"
+            f"- Łączna wartość transakcji: **{wartosc_pozycji:,.2f}** (Limit 10%)\n"
+            f"- Faktyczna strata na SL: **{faktyczne_ryzyko_kwota:,.2f}** ({faktyczne_ryzyko_proc:.2f}%)\n"
+            f"- Stosunek Zysku do Ryzyka: **1 : {r_r:.2f}**\n"
             f"{komunikat_blokady}"
         )
     else:
         st.warning("Stop Loss nie może być równy bieżącej cenie.")
-        
 
 with tab4:
     st.subheader("🔍 Skaner Okazji Rynkowych")
@@ -397,7 +400,6 @@ with tab5:
     df_d = wczytaj_dziennik()
     if not df_d.empty:
         zamkniete = df_d[df_d['Status'] == 'Zamknięte'].copy()
-        
         if not zamkniete.empty:
             zamkniete['Wynik'] = pd.to_numeric(zamkniete['Wynik'], errors='coerce').fillna(0)
             total_trades = len(zamkniete)
@@ -407,34 +409,25 @@ with tab5:
             suma_wynikow = zamkniete['Wynik'].sum()
             
             c_s1, c_s2, c_s3, c_s4 = st.columns(4)
-            c_s1.metric("Zamknięte pozycje", total_trades)
-            c_s2.metric("Skuteczność (Win Rate)", f"{win_rate:.1f}%")
+            c_s1.metric("Zam. pozycje", total_trades)
+            c_s2.metric("Skuteczność", f"{win_rate:.1f}%")
             c_s3.metric("Zysk / Strata", f"{zyskownych} / {stratnych}")
-            c_s4.metric("Całkowity Wynik (PnL)", f"{suma_wynikow:.2f}")
+            c_s4.metric("Wynik (PnL)", f"{suma_wynikow:.2f}")
             
-            zamkniete['Krzywa Kapitału'] = zamkniete['Wynik'].cumsum()
-            fig_eq = go.Figure()
-            fig_eq.add_trace(go.Scatter(
-                x=zamkniete['Data'], y=zamkniete['Krzywa Kapitału'], 
-                mode='lines+markers', name='Krzywa PnL', 
-                line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)
-            ))
+            zamkniete['Krzywa'] = zamkniete['Wynik'].cumsum()
+            fig_eq = go.Figure(go.Scatter(x=zamkniete['Data'], y=zamkniete['Krzywa'], mode='lines+markers', line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)))
             fig_eq.update_layout(title="Krzywa Zysków i Strat", template="plotly_dark", height=350)
             st.plotly_chart(fig_eq, use_container_width=True)
-        else:
-            st.info("Brak **zamkniętych** pozycji do wyliczenia statystyk i krzywej kapitału.")
             
-        st.markdown("### 📝 Pełna historia operacji (Otwarte i Zamknięte)")
+        st.markdown("### 📝 Pełna historia operacji")
         st.dataframe(df_d, use_container_width=True)
-    else:
-        st.info("Twój dziennik jest na razie całkowicie pusty.")
 
 with tab6:
     st.subheader("📊 Mój Portfel Live (Trading 212 Demo)")
     if not T212_KEY or not T212_SEC:
         st.warning("⚠️ Brak kluczy API w Streamlit Secrets!")
     else:
-        if st.button("🔄 Odśwież dane portfela"):
+        if st.button("🔄 Odśwież dane portfela z T212"):
             st.cache_data.clear()
             
         @st.cache_data(ttl=30)
@@ -457,26 +450,18 @@ with tab6:
             col3.metric("Zainwestowane", f"{kasa.get('invested', 0):.2f}")
             col4.metric("Wynik (PnL)", f"{kasa.get('ppl', 0):.2f}")
             
-            st.markdown("### 📝 Aktualnie Otwarte Pozycje przez Bota")
             if pozycje and isinstance(pozycje, list) and len(pozycje) > 0:
                 lista = []
                 for p in pozycje:
-                    # --- PRECYZYJNE MAPOWANIE Z ZAGNIEŻDŻONEJ ODPOWIEDZI API ---
-                    
-                    # 1. Ticker i Nazwa
                     instr = p.get('instrument', {})
                     tckr_raw = instr.get('ticker', 'N/A')
                     nazwa_raw = instr.get('name', '')
                     wyswietlany_ticker = f"{nazwa_raw} ({tckr_raw})" if nazwa_raw else tckr_raw
                     
-                    # 2. Wolumen i Obecna Cena
                     qty = float(p.get('quantity', 0.0))
                     cur_p = float(p.get('currentPrice', 0.0))
-                    
-                    # 3. Średnia cena wejścia
                     avg_p = float(p.get('averagePricePaid', 0.0))
                     
-                    # 4. Zysk / Strata
                     wallet = p.get('walletImpact', {})
                     ppl = float(wallet.get('unrealizedProfitLoss', 0.0))
                     
@@ -489,10 +474,7 @@ with tab6:
                         "Zysk / Strata": round(ppl, 2)
                     })
                 st.dataframe(pd.DataFrame(lista), use_container_width=True)
-                
-                with st.expander("🛠️ Pokaż surowe dane z API"):
-                    st.json(pozycje)
             else:
                 st.info("Brak otwartych pozycji na platformie Trading 212.")
         else:
-            st.error("Błąd połączenia. Odśwież stronę lub sprawdź klucze API.")
+            st.error("Błąd połączenia. Sprawdź klucze API.")
