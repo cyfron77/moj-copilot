@@ -169,13 +169,13 @@ def pobierz_swieze_newsy(symbol, query):
                 })
     return news_list
 
-# --- INTELIGENTNA BRAMKA FinBERT (Z Fallbackiem) ---
-# --- INTELIGENTNA BRAMKA FinBERT (Z Raportowaniem Silnika) ---
+# --- INTELIGENTNA BRAMKA FinBERT ---
 def analizuj_sentyment_finbert(tytuly, token):
     if not token or not tytuly:
-        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Brak tokenu)"
+        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Brak tokenu w chmurze ⚪)"
     
-    url = "https://api-inference.huggingface.co/models/ProsusAI/finbert"
+    # NOWY endpoint Hugging Face z pominięciem przestarzałego api-inference
+    url = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
     headers = {"Authorization": f"Bearer {token}"}
     
     try:
@@ -194,11 +194,11 @@ def analizuj_sentyment_finbert(tytuly, token):
             return scores, "FinBERT (HuggingFace API 🟢)"
         elif response.status_code == 503:
             st.toast("⚠️ Model FinBERT wybudza się z uśpienia. Użyto zapasowego TextBlob.", icon="⏳")
-            return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (FinBERT 503 - Wybudzanie)"
+            return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (FinBERT 503 - Wybudzanie ⏳)"
         else:
-            return [TextBlob(t).sentiment.polarity for t in tytuly], f"TextBlob (Błąd API: {response.status_code})"
+            return [TextBlob(t).sentiment.polarity for t in tytuly], f"TextBlob (Błąd API: {response.status_code} 🔴)"
     except Exception as e:
-        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Błąd połączenia)"
+        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Błąd połączenia 🔴)"
 
 # --- GŁÓWNY PANEL GÓRNY (Surowe Metryki) ---
 c1, c2, c3, c4, c5 = st.columns(5)
@@ -214,17 +214,18 @@ st.markdown("---")
 verdict_placeholder = st.empty()
 
 if st.button("🔄 Odśwież Werdykt (Analiza AI)"):
-    with st.spinner(f"Analizuję wiadomości przez sieć neuronową FinBERT dla {ticker}..."):
+    with st.spinner(f"Analizuję wiadomości przez sieć neuronową dla {ticker}..."):
         surowe_newsy = pobierz_swieze_newsy(ticker, search_query)
         tytuly = [item["tytul"] for item in surowe_newsy]
         
-        # Błyskawiczna analiza całej paczki przez HuggingFace API
-        sentymenty_wartosci = analizuj_sentyment_finbert(tytuly, HF_TOKEN)
+        # Poprawne rozpakowanie wartości z funkcji
+        sentymenty_wartosci, silnik_info = analizuj_sentyment_finbert(tytuly, HF_TOKEN)
         
         sentymenty = []
         news_items = []
         for i, item in enumerate(surowe_newsy):
-            polaryzacja = sentymenty_wartosci[i] if i < len(sentymenty_wartosci) else TextBlob(item["tytul"]).sentiment.polarity
+            # Odpowiednie wyciągnięcie zmiennej float dla każdego nagłówka
+            polaryzacja = float(sentymenty_wartosci[i]) if i < len(sentymenty_wartosci) else float(TextBlob(item["tytul"]).sentiment.polarity)
             sentymenty.append(polaryzacja)
             kolor = "🟢 Pozytywny" if polaryzacja > 0.05 else ("🔴 Negatywny" if polaryzacja < -0.05 else "⚪ Neutralny")
             news_items.append({
@@ -280,13 +281,14 @@ if st.button("🔄 Odśwież Werdykt (Analiza AI)"):
             'macd_opis': m_opis, 'sent_opis': s_opis, 'werdykt_status': w_stat, 
             'werdykt_kolor': w_kolor, 'werdykt_komentarz': w_kom, 
             'news_items': news_items, 'avg_sent': avg_sent, 
-            'czas': datetime.now().strftime("%H:%M:%S")
+            'czas': datetime.now().strftime("%H:%M:%S"),
+            'silnik': silnik_info
         }
 
 # Wyświetlanie aktualnego stanu werdyktu
 if st.session_state.ai_data:
     d = st.session_state.ai_data
-    komunikat = f"🎯 **WERDYKT AI COPILOTA: {d['werdykt_status']}** (dla {d['ticker']})\n\n- {d['trend_opis']} | {d['rsi_opis']} | {d['macd_opis']} | Sentyment: {d['sent_opis']}\n- *{d['werdykt_komentarz']}*\n*(Ostatnia analiza: {d['czas']})*"
+    komunikat = f"🎯 **WERDYKT AI COPILOTA: {d['werdykt_status']}** (dla {d['ticker']})\n\n- {d['trend_opis']} | {d['rsi_opis']} | {d['macd_opis']} | Sentyment: {d['sent_opis']}\n- *{d['werdykt_komentarz']}*\n*(Ostatnia analiza: {d['czas']} | 🧠 {d['silnik']})*"
     
     if d['werdykt_kolor'] == "success":
         verdict_placeholder.success(komunikat)
@@ -324,28 +326,22 @@ with tab1:
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='cyan', width=1.5), name="MACD"), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='yellow', width=1.2), name="Sygnał MACD"), row=2, col=1)
     
-    # Usuwanie pustych luk z weekendów
-    fig.update_xaxes(
-        rangebreaks=[
-            dict(bounds=["sat", "mon"])
-        ]
-    )
-    
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     fig.update_layout(title=f"Analiza techniczna: {ticker}", xaxis_rangeslider_visible=False, height=620, template="plotly_dark", margin=dict(l=20, r=20, t=40, b=20))
     st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.subheader("📰 Świeże wiadomości rynkowe i Sentyment (FinBERT)")
+    st.subheader("📰 Świeże wiadomości rynkowe i Sentyment")
     if st.session_state.ai_data:
         d = st.session_state.ai_data
-        st.caption(f"Wyświetlam wyniki zamrożone dla: **{d['ticker']}** (Aktualizacja: {d['czas']})")
+        st.caption(f"Wyświetlam wyniki zamrożone dla: **{d['ticker']}** (Aktualizacja: {d['czas']}) | 🧠 Silnik: **{d.get('silnik', 'TextBlob')}**")
         if d['ticker'] != ticker:
             st.warning(f"⚠️ Uwaga: Poniższe wiadomości dotyczą aktywa **{d['ticker']}**. Jeśli chcesz pobrać newsy dla **{ticker}**, kliknij przycisk 'Odśwież Werdykt' powyżej.")
         
         if d['news_items']:
             for item in d['news_items']:
                 st.markdown(f"**[{item['tytul']}]({item['link']})**")
-                st.caption(f"Sentyment FinBERT: {item['status']} (`{item['score']:.2f}`) | Źródło: **{item['zrodlo']}** | Opublikowano: **{item['data']}**")
+                st.caption(f"Sentyment: {item['status']} (`{item['score']:.2f}`) | Źródło: **{item['zrodlo']}** | Opublikowano: **{item['data']}**")
                 st.write("---")
         else:
             st.warning("Brak najnowszych wiadomości z ostatnich dni.")
@@ -369,12 +365,10 @@ with tab3:
     if roznica_sl > 0:
         max_strata_kwota = kapital * (ryzyko_proc / 100)
         liczba_z_ryzyka = int(max_strata_kwota / roznica_sl)
-        
         max_wartosc_kapitalu = kapital * 0.10
         liczba_z_kapitalu = int(max_wartosc_kapitalu / ostatnia_cena)
         
         rekomendowana_liczba = min(liczba_z_ryzyka, liczba_z_kapitalu)
-        
         wartosc_pozycji = rekomendowana_liczba * ostatnia_cena
         faktyczne_ryzyko_kwota = rekomendowana_liczba * roznica_sl
         faktyczne_ryzyko_proc = (faktyczne_ryzyko_kwota / kapital) * 100
@@ -382,7 +376,7 @@ with tab3:
         
         komunikat_blokady = ""
         if rekomendowana_liczba == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka:
-            komunikat_blokady = "\n\n⚠️ *Uwaga: Zadziałała blokada kapitałowa. Zmniejszono pozycję do max. 10% portfela, aby uniknąć zamrożenia środków.*"
+            komunikat_blokady = "\n\n⚠️ *Uwaga: Zadziałała blokada kapitałowa. Zmniejszono pozycję do max. 10% portfela.*"
         
         st.success(
             f"🎯 Parametry zlecenia:\n\n"
