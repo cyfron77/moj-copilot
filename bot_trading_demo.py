@@ -66,20 +66,45 @@ def analizuj_sentyment_finbert(tytuly, token):
         return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Błąd połączenia)"
 
 # Mapa aktywów: Ticker dla API brokera -> Ticker dla Yahoo Finance
+# Mapa aktywów: Ticker dla API brokera -> Ticker dla Yahoo Finance
 aktywa_do_handlu = {
-    "NVIDIA": {"t212": "NVDA_US_EQ", "yf": "NVDA", "search": "NVIDIA stock news"},
+    # --- USA: TOPOWE SPÓŁKI TECHNOLOGICZNE I FINANSOWE ---
     "Apple": {"t212": "AAPL_US_EQ", "yf": "AAPL", "search": "Apple stock market news"},
     "Microsoft": {"t212": "MSFT_US_EQ", "yf": "MSFT", "search": "Microsoft stock news"},
-    "Tesla": {"t212": "TSLA_US_EQ", "yf": "TSLA", "search": "Tesla stock market news"},
+    "NVIDIA": {"t212": "NVDA_US_EQ", "yf": "NVDA", "search": "NVIDIA stock news"},
     "Alphabet (Google)": {"t212": "GOOGL_US_EQ", "yf": "GOOGL", "search": "Google stock market news"},
     "Amazon": {"t212": "AMZN_US_EQ", "yf": "AMZN", "search": "Amazon stock market news"},
     "Meta (Facebook)": {"t212": "META_US_EQ", "yf": "META", "search": "Meta Facebook stock news"},
+    "Tesla": {"t212": "TSLA_US_EQ", "yf": "TSLA", "search": "Tesla stock market news"},
+    "Broadcom": {"t212": "AVGO_US_EQ", "yf": "AVGO", "search": "Broadcom stock news"},
     "JPMorgan": {"t212": "JPM_US_EQ", "yf": "JPM", "search": "JPMorgan stock market news"},
     "Visa": {"t212": "V_US_EQ", "yf": "V", "search": "Visa stock market news"},
-    "Coca-Cola": {"t212": "KO_US_EQ", "yf": "KO", "search": "Coca Cola stock news"},
-    "Disney": {"t212": "DIS_US_EQ", "yf": "DIS", "search": "Disney stock news"}
-}
+    "Walmart": {"t212": "WMT_US_EQ", "yf": "WMT", "search": "Walmart stock news"},
 
+    # --- GPW: TOPOWE SPÓŁKI (WIG20) ---
+    "PKO BP": {"t212": "PKO_PL_EQ", "yf": "PKO.WA", "search": "PKO BP bank gielda GPW"},
+    "Orlen": {"t212": "ORL_PL_EQ", "yf": "ORL.WA", "search": "Orlen gielda GPW"},
+    "CD Projekt": {"t212": "CDR_PL_EQ", "yf": "CDR.WA", "search": "CD Projekt gielda akcje"},
+    "PZU": {"t212": "PZU_PL_EQ", "yf": "PZU.WA", "search": "PZU gielda GPW"},
+    "Dino Polska": {"t212": "DNP_PL_EQ", "yf": "DNP.WA", "search": "Dino Polska gielda GPW"},
+    "KGHM": {"t212": "KGH_PL_EQ", "yf": "KGH.WA", "search": "KGHM miedz gielda GPW"},
+    "Allegro": {"t212": "ALE_PL_EQ", "yf": "ALE.WA", "search": "Allegro gielda GPW"},
+    "LPP": {"t212": "LPP_PL_EQ", "yf": "LPP.WA", "search": "LPP gielda GPW"},
+    "Bank Pekao": {"t212": "PEO_PL_EQ", "yf": "PEO.WA", "search": "Bank Pekao gielda GPW"},
+    "mBank": {"t212": "MBK_PL_EQ", "yf": "MBK.WA", "search": "mBank gielda GPW"},
+
+    # --- TOP 10 ETF / ETN NA ŚWIECIE ---
+    "S&P 500 ETF (SPY)": {"t212": "SPY_US_EQ", "yf": "SPY", "search": "S&P 500 ETF news"},
+    "Nasdaq 100 ETF (QQQ)": {"t212": "QQQ_US_EQ", "yf": "QQQ", "search": "Nasdaq 100 ETF news"},
+    "Vanguard Total World (VT)": {"t212": "VT_US_EQ", "yf": "VT", "search": "Vanguard Total World Stock ETF"},
+    "Vanguard All-World (VWCE)": {"t212": "VWCE_DE_EQ", "yf": "VWCE.DE", "search": "VWCE ETF market news"},
+    "Emerging Markets ETF (VWO)": {"t212": "VWO_US_EQ", "yf": "VWO", "search": "Emerging markets ETF news"},
+    "Dividend ETF (SCHD)": {"t212": "SCHD_US_EQ", "yf": "SCHD", "search": "Schwab Dividend ETF news"},
+    "Gold Trust ETF (GLD)": {"t212": "GLD_US_EQ", "yf": "GLD", "search": "SPDR Gold Trust ETF news"},
+    "20+ Year Treasury Bonds (TLT)": {"t212": "TLT_US_EQ", "yf": "TLT", "search": "iShares 20+ Year Treasury Bond ETF"},
+    "Real Estate REITs (VNQ)": {"t212": "VNQ_US_EQ", "yf": "VNQ", "search": "Vanguard Real Estate ETF"},
+    "ARK Innovation (ARKK)": {"t212": "ARKK_US_EQ", "yf": "ARKK", "search": "ARK Innovation ETF news"}
+}
 def pobierz_stan_konta():
     url = f"{T212_BASE_URL}/account/cash"
     try:
