@@ -274,7 +274,21 @@ with tab1:
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='cyan', width=1.5), name="MACD"), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='yellow', width=1.2), name="Sygnał MACD"), row=2, col=1)
     
-    fig.update_layout(title=f"Analiza techniczna: {ticker}", xaxis_rangeslider_visible=False, height=620, template="plotly_dark")
+    fig.update_layout(
+        title=f"Analiza techniczna: {ticker}", 
+        xaxis_rangeslider_visible=False, 
+        height=620, 
+        template="plotly_dark",
+        margin=dict(l=20, r=20, t=40, b=20)
+    )
+    
+    # --- NOWOŚĆ: Usuwanie pustych luk (weekendów) z wykresu ---
+    fig.update_xaxes(
+        rangebreaks=[
+            dict(bounds=["sat", "mon"]) # Ukrywa czas od soboty do poniedziałku
+        ]
+    )
+    
     st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
