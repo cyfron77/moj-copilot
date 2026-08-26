@@ -91,19 +91,12 @@ def pobierz_stan_konta():
         print(f"Błąd konta: {e}")
     return 0.0, 0.0
 
-def pobierz_otwarte_pozycje():
+def pobierz_otwarte_pozycje_szczegoly():
     url = f"{T212_BASE_URL}/positions"
     try:
         response = requests.get(url, auth=(T212_API_KEY, T212_API_SECRET))
         if response.status_code == 200:
-            pozycje = response.json()
-            otwarte_tickery = []
-            if isinstance(pozycje, list):
-                for p in pozycje:
-                    tckr = p.get('ticker') or p.get('instrument', {}).get('ticker')
-                    if tckr:
-                        otwarte_tickery.append(tckr)
-            return otwarte_tickery
+            return response.json()
     except Exception as e:
         print(f"Błąd pobierania pozycji: {e}")
     return []
@@ -135,25 +128,18 @@ def analizuj_szeroki_rynek():
     return rynek_rosnie, ostatnia_cena, sma50
 
 def analizuj_aktywo(nazwa, symbol_yf, query):
-    # --- NOWOŚĆ: MULTI-TIMEFRAME ANALYSIS (Trend Tygodniowy 1W) ---
+    # Multi-Timeframe Analysis (1W)
     df_wk = yf.download(symbol_yf, period="2y", interval="1wk", progress=False)
-    trend_tygodniowy_rosnacy = True # Wartość domyślna
+    trend_tygodniowy_rosnacy = True 
     
     if df_wk is not None and not df_wk.empty:
         if isinstance(df_wk.columns, pd.MultiIndex):
             df_wk.columns = df_wk.columns.get_level_values(0)
         df_wk['SMA50'] = df_wk['Close'].rolling(window=50).mean()
-        
-        # Weryfikacja na podstawie długoterminowej SMA50 (ok. roku)
         if not pd.isna(df_wk['SMA50'].iloc[-1]):
             trend_tygodniowy_rosnacy = float(df_wk['Close'].iloc[-1]) > float(df_wk['SMA50'].iloc[-1])
-        else:
-            # Fallback dla krótszej historii
-            df_wk['SMA20'] = df_wk['Close'].rolling(window=20).mean()
-            if not pd.isna(df_wk['SMA20'].iloc[-1]):
-                trend_tygodniowy_rosnacy = float(df_wk['Close'].iloc[-1]) > float(df_wk['SMA20'].iloc[-1])
 
-    # --- Standardowa Analiza Dzienna (1D) ---
+    # Analiza Dzienna (1D) z filtrem wolumenu
     df = yf.download(symbol_yf, period="3mo", interval="1d", progress=False)
     if df is None or df.empty:
         return False, 0.0, 0.0, ""
@@ -162,6 +148,11 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
         df.columns = df.columns.get_level_values(0)
 
     df['SMA50'] = df['Close'].rolling(window=50).mean()
+    
+    # --- NOWOŚĆ: FILTR WOLUMENOWY (20 dni) ---
+    df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
+    ostatni_wolumen = float(df['Volume'].iloc[-1])
+    wolumen_sma = float(df['Vol_SMA20'].iloc[-1])
     
     delta = df['Close'].diff()
     gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
@@ -206,25 +197,28 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     if macd_val > macd_sig: punkty_bycze += 1
     if avg_sent > 0.05: punkty_bycze += 1
 
-    # Podgląd w logach z uwzględnieniem trendu 1W
     trend_1w_status = 'UP' if trend_tygodniowy_rosnacy else 'DOWN'
     trend_1d_status = 'UP' if ostatnia_cena > sma50 else 'DOWN'
-    macd_status = 'Byczy' if macd_val > macd_sig else 'Niedźwiedzi'
+    vol_status = 'WYSOKI' if ostatni_wolumen > wolumen_sma else 'NISKI'
     
-    print(f"[{nazwa}] Trend 1D: {trend_1d_status} | Trend 1W: {trend_1w_status} | RSI: {rsi:.1f} | MACD: {macd_status} | Sentyment: {avg_sent:.2f} ({silnik})")
+    print(f"[{nazwa}] Trend: 1D {trend_1d_status} | 1W {trend_1w_status} | Vol: {vol_status} | RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedźwiedzi'} | Sentyment: {avg_sent:.2f} ({silnik})")
     
     if punkty_bycze >= 3:
-        # Zderzenie sygnału dziennego z trendem tygodniowym
-        if trend_tygodniowy_rosnacy:
-            return True, ostatnia_cena, float(atr), silnik
-        else:
-            print(f"🛑 ZIGNOROWANO SYGNAŁ (Multi-Timeframe): Dzienny sygnał kupna odrzucony - długoterminowy trend tygodniowy (1W) jest SPADKOWY.")
+        if not trend_tygodniowy_rosnacy:
+            print(f"🛑 ZIGNOROWANO (Multi-Timeframe): Tygodniowy trend (1W) jest SPADKOWY.")
             return False, ostatnia_cena, float(atr), silnik
+        
+        # --- ZASTOSOWANIE TWARDEGO FILTRA WOLUMENU ---
+        if ostatni_wolumen < wolumen_sma * 0.9: # Tolerancja 10% odchylenia od średniej
+            print(f"🛑 ZIGNOROWANO (Filtr Wolumenu): Słaby wolumen nie potwierdza siły kupujących (Pułapka na Byki).")
+            return False, ostatnia_cena, float(atr), silnik
+            
+        return True, ostatnia_cena, float(atr), silnik
             
     return False, ostatnia_cena, float(atr), silnik
 
 def uruchom_automatyzacje():
-    print("🛡️ Uruchamiam bota (Multi-Timeframe + FinBERT + S&P500 Filter + T212 API)...")
+    print("🛡️ Uruchamiam bota (Trailing Stop + Vol Filter + FinBERT + S&P500 + T212 API)...")
     free_cash, total_capital = pobierz_stan_konta()
     print(f"💰 Wolne środki: {free_cash:.2f} PLN | Całkowity kapitał: {total_capital:.2f} PLN")
     
@@ -239,25 +233,57 @@ def uruchom_automatyzacje():
         kurs_usd_pln = float(df_usd['Close'].iloc[-1])
     except:
         kurs_usd_pln = 4.0
-        
-    print(f"💱 Aktualny kurs USD/PLN pobrany przez bota: {kurs_usd_pln:.4f}")
 
     print("\n🌎 Analizuję stan szerokiego rynku (Indeks S&P 500)...")
     rynek_rosnie, spy_cena, spy_sma50 = analizuj_szeroki_rynek()
     
     if rynek_rosnie:
-        print(f"✅ Szeroki rynek w trendzie WZROSTOWYM (Cena: {spy_cena:.2f} > SMA50: {spy_sma50:.2f}). Akceptuję otwieranie pozycji LONG.")
+        print("✅ Szeroki rynek WZROSTOWY. Akceptuję longi.")
     else:
-        print(f"⚠️ UWAGA: Szeroki rynek w trendzie SPADKOWYM (Cena: {spy_cena:.2f} < SMA50: {spy_sma50:.2f}).")
-        print("🛑 Otwieranie nowych pozycji LONG będzie dzisiaj zablokowane dla ochrony kapitału!")
+        print("⚠️ Szeroki rynek SPADKOWY. Otwieranie longów zablokowane.")
 
-    posiadane_aktywa = pobierz_otwarte_pozycje()
-    print(f"📂 Aktualnie posiadane tickery w portfelu: {posiadane_aktywa}")
+    # --- NOWOŚĆ: KONTROLA TRAILING STOP DLA OTWARTYCH POZYCJI ---
+    print("\n🛡️ Analizuję otwarte pozycje w poszukiwaniu okazji do Trailing Stopa (ochrona zysków)...")
+    otwarte_szczegoly = pobierz_otwarte_pozycje_szczegoly()
+    posiadane_tickery = []
+    
+    if isinstance(otwarte_szczegoly, list):
+        for p in otwarte_szczegoly:
+            tckr = p.get('ticker') or p.get('instrument', {}).get('ticker')
+            if not tckr: continue
+            posiadane_tickery.append(tckr)
+            
+            zysk_pln = float(p.get('walletImpact', {}).get('unrealizedProfitLoss', 0.0))
+            if zysk_pln > 0:
+                yf_sym = next((info['yf'] for info in aktywa_do_handlu.values() if info['t212'] == tckr), None)
+                nazwa_spolki = next((nazwa for nazwa, info in aktywa_do_handlu.items() if info['t212'] == tckr), tckr)
+                
+                if yf_sym:
+                    df_ts = yf.download(yf_sym, period="1mo", interval="1d", progress=False)
+                    if df_ts is not None and not df_ts.empty:
+                        if isinstance(df_ts.columns, pd.MultiIndex):
+                            df_ts.columns = df_ts.columns.get_level_values(0)
+                        df_ts['SMA20'] = df_ts['Close'].rolling(window=20).mean()
+                        cena_ts = float(df_ts['Close'].iloc[-1])
+                        sma20_ts = float(df_ts['SMA20'].iloc[-1])
+                        
+                        if cena_ts < sma20_ts:
+                            print(f"🚨 [TRAILING STOP] {nazwa_spolki}: Cena spadła poniżej SMA20! Zysk maleje.")
+                            wiadomosc_ts = (
+                                f"🚨 *TRAILING STOP ALERT (Ochrona Zysku)*\n\n"
+                                f"Twoja pozycja na *{nazwa_spolki}* ({tckr}) zaczyna słabnąć.\n"
+                                f"- Aktualna Cena: `{cena_ts:.2f} USD` (Spadek poniżej średniej SMA20)\n"
+                                f"- Obecny, niezrealizowany zysk: `+{zysk_pln:.2f} PLN`\n\n"
+                                f"💡 *Sugestia AI:* Trend wzrostowy został złamany. Rozważ zalogowanie do aplikacji brokera i ręczne zamknięcie pozycji, aby bezpiecznie skasować ten zysk!"
+                            )
+                            wyslij_telegram(wiadomosc_ts)
+                        else:
+                            print(f"🟢 [HOLD] {nazwa_spolki} bezpieczny w trendzie. Zysk rośnie: {zysk_pln:.2f} PLN.")
 
     for nazwa, info in aktywa_do_handlu.items():
         print(f"\nSkupiam się na: {nazwa}...")
         
-        if info["t212"] in posiadane_aktywa:
+        if info["t212"] in posiadane_tickery:
             print(f"🟡 POMINIĘCIE: Masz już otwartą pozycję na {nazwa} ({info['t212']}). Szukam dalej.")
             continue
             
@@ -267,7 +293,7 @@ def uruchom_automatyzacje():
             print(f"🟢 POTWIERDZONY SYGNAŁ KUPNA DLA {nazwa}!")
             
             if not rynek_rosnie:
-                print(f"🛑 ZIGNOROWANO ZAKUP: System odrzucił wejście w {nazwa}, ponieważ S&P 500 znajduje się w trendzie spadkowym.")
+                print(f"🛑 ZIGNOROWANO ZAKUP: S&P 500 jest w trendzie spadkowym.")
                 continue
             
             ryzyko_max_pln = total_capital * 0.015
@@ -282,14 +308,14 @@ def uruchom_automatyzacje():
             wolumen = min(liczba_z_ryzyka, liczba_z_kapitalu)
             
             if wolumen < 1:
-                print(f"🟡 Pomięcie {nazwa}: Akcja zbyt droga na bezpieczne wejście.")
+                print(f"🟡 Pomięcie {nazwa}: Akcja zbyt droga.")
                 continue
             
             szacowany_koszt_usd = wolumen * cena_usd
             szacowany_koszt_pln = szacowany_koszt_usd * kurs_usd_pln
             
             if szacowany_koszt_pln > free_cash:
-                print(f"⛔ Blokada kapitału: Szacowany koszt ({szacowany_koszt_pln:.2f} PLN) przewyższa wolne środki.")
+                print(f"⛔ Blokada kapitału: Brak wolnych środków.")
                 continue
             
             poziom_sl = cena_usd - roznica_sl_usd
@@ -315,6 +341,7 @@ def uruchom_automatyzacje():
                     f"- 🛑 Stop Loss: `{poziom_sl:.2f} USD`\n"
                     f"- 🎯 Take Profit: `{poziom_tp:.2f} USD`\n"
                     f"🧠 Analiza NLP: _{uzyty_silnik}_\n"
+                    f"📊 Filtr Wolumenu: _Potwierdzony (Trend Siły)_\n"
                     f"{notatka_blokady}"
                 )
                 wyslij_telegram(wiada)
