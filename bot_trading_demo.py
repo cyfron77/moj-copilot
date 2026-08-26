@@ -77,9 +77,7 @@ aktywa_do_handlu = {
     "JPMorgan": {"t212": "JPM_US_EQ", "yf": "JPM", "search": "JPMorgan stock market news"},
     "Visa": {"t212": "V_US_EQ", "yf": "V", "search": "Visa stock market news"},
     "Coca-Cola": {"t212": "KO_US_EQ", "yf": "KO", "search": "Coca Cola stock news"},
-    "Disney": {"t212": "DIS_US_EQ", "yf": "DIS", "search": "Disney stock news"},
-    "S&P 500 ETF": {"t212": "SPY_US_EQ", "yf": "SPY", "search": "S&P 500 index market today"},
-    "Nasdaq 100 ETF": {"t212": "QQQ_US_EQ", "yf": "QQQ", "search": "Nasdaq 100 ETF market"}
+    "Disney": {"t212": "DIS_US_EQ", "yf": "DIS", "search": "Disney stock news"}
 }
 
 def pobierz_stan_konta():
@@ -121,10 +119,29 @@ def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
     response = requests.post(url, json=payload, auth=(T212_API_KEY, T212_API_SECRET))
     return response.status_code == 200, response.json()
 
+# --- NOWOŚĆ: Filtr Szerokiego Rynku (Indeks S&P 500) ---
+def analizuj_szeroki_rynek():
+    # Pobieramy ETF na S&P 500 (SPY) jako reprezentację giełdy w USA
+    df = yf.download("SPY", period="3mo", interval="1d", progress=False)
+    if df is None or df.empty:
+        # W przypadku błędu pobierania, domyślnie zezwalamy na handel
+        return True, 0.0, 0.0
+        
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
+
+    df['SMA50'] = df['Close'].rolling(window=50).mean()
+    ostatnia_cena = float(df['Close'].iloc[-1])
+    sma50 = float(df['SMA50'].iloc[-1])
+    
+    # Zwraca True, jeśli S&P 500 jest powyżej swojej SMA50
+    rynek_rosnie = ostatnia_cena > sma50
+    return rynek_rosnie, ostatnia_cena, sma50
+
 def analizuj_aktywo(nazwa, symbol_yf, query):
     df = yf.download(symbol_yf, period="3mo", interval="1d", progress=False)
     if df is None or df.empty:
-        return False, 0.0, 0.0
+        return False, 0.0, 0.0, ""
         
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
@@ -158,7 +175,6 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=en-US&gl=US&ceid=US:en"
     feed = feedparser.parse(rss_url)
     
-    # --- POBRANIE SENTYMENTU PRZEZ FINBERT ---
     tytuly_newsow = []
     if feed.entries:
         for entry in feed.entries[:5]:
@@ -200,6 +216,16 @@ def uruchom_automatyzacje():
         
     print(f"💱 Aktualny kurs USD/PLN pobrany przez bota: {kurs_usd_pln:.4f}")
 
+    # --- KONTROLA SZEROKIEGO RYNKU ---
+    print("\n🌎 Analizuję stan szerokiego rynku (Indeks S&P 500)...")
+    rynek_rosnie, spy_cena, spy_sma50 = analizuj_szeroki_rynek()
+    
+    if rynek_rosnie:
+        print(f"✅ Szeroki rynek w trendzie WZROSTOWYM (Cena: {spy_cena:.2f} > SMA50: {spy_sma50:.2f}). Akceptuję otwieranie pozycji LONG.")
+    else:
+        print(f"⚠️ UWAGA: Szeroki rynek w trendzie SPADKOWYM (Cena: {spy_cena:.2f} < SMA50: {spy_sma50:.2f}).")
+        print("🛑 Otwieranie nowych pozycji LONG będzie dzisiaj zablokowane dla ochrony kapitału!")
+
     posiadane_aktywa = pobierz_otwarte_pozycje()
     print(f"📂 Aktualnie posiadane tickery w portfelu: {posiadane_aktywa}")
 
@@ -214,6 +240,11 @@ def uruchom_automatyzacje():
         
         if sygnal:
             print(f"🟢 MOCNY SYGNAŁ KUPNA DLA {nazwa}!")
+            
+            # Weryfikacja blokady z szerokiego rynku
+            if not rynek_rosnie:
+                print(f"🛑 ZIGNOROWANO ZAKUP: System odrzucił wejście w {nazwa}, ponieważ S&P 500 znajduje się w trendzie spadkowym.")
+                continue
             
             ryzyko_max_pln = total_capital * 0.015
             ryzyko_max_usd = ryzyko_max_pln / kurs_usd_pln
