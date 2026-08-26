@@ -127,8 +127,8 @@ def analizuj_szeroki_rynek():
     rynek_rosnie = ostatnia_cena > sma50
     return rynek_rosnie, ostatnia_cena, sma50
 
+# Zmiana: Funkcja zwraca teraz również "uzasadnienie" (tekst)
 def analizuj_aktywo(nazwa, symbol_yf, query):
-    # Multi-Timeframe Analysis (1W)
     df_wk = yf.download(symbol_yf, period="2y", interval="1wk", progress=False)
     trend_tygodniowy_rosnacy = True 
     
@@ -139,17 +139,14 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
         if not pd.isna(df_wk['SMA50'].iloc[-1]):
             trend_tygodniowy_rosnacy = float(df_wk['Close'].iloc[-1]) > float(df_wk['SMA50'].iloc[-1])
 
-    # Analiza Dzienna (1D) z filtrem wolumenu
     df = yf.download(symbol_yf, period="3mo", interval="1d", progress=False)
     if df is None or df.empty:
-        return False, 0.0, 0.0, ""
+        return False, 0.0, 0.0, "", ""
         
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
     df['SMA50'] = df['Close'].rolling(window=50).mean()
-    
-    # --- NOWOŚĆ: FILTR WOLUMENOWY (20 dni) ---
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
     ostatni_wolumen = float(df['Volume'].iloc[-1])
     wolumen_sma = float(df['Vol_SMA20'].iloc[-1])
@@ -201,24 +198,28 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     trend_1d_status = 'UP' if ostatnia_cena > sma50 else 'DOWN'
     vol_status = 'WYSOKI' if ostatni_wolumen > wolumen_sma else 'NISKI'
     
-    print(f"[{nazwa}] Trend: 1D {trend_1d_status} | 1W {trend_1w_status} | Vol: {vol_status} | RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedźwiedzi'} | Sentyment: {avg_sent:.2f} ({silnik})")
+    print(f"[{nazwa}] Trend: 1D {trend_1d_status} | 1W {trend_1w_status} | Vol: {vol_status} | RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedz.'} | Sentyment: {avg_sent:.2f} ({silnik})")
     
     if punkty_bycze >= 3:
         if not trend_tygodniowy_rosnacy:
-            print(f"🛑 ZIGNOROWANO (Multi-Timeframe): Tygodniowy trend (1W) jest SPADKOWY.")
-            return False, ostatnia_cena, float(atr), silnik
+            return False, ostatnia_cena, float(atr), silnik, ""
         
-        # --- ZASTOSOWANIE TWARDEGO FILTRA WOLUMENU ---
-        if ostatni_wolumen < wolumen_sma * 0.9: # Tolerancja 10% odchylenia od średniej
-            print(f"🛑 ZIGNOROWANO (Filtr Wolumenu): Słaby wolumen nie potwierdza siły kupujących (Pułapka na Byki).")
-            return False, ostatnia_cena, float(atr), silnik
+        if ostatni_wolumen < wolumen_sma * 0.9: 
+            return False, ostatnia_cena, float(atr), silnik, ""
             
-        return True, ostatnia_cena, float(atr), silnik
+        # Generowanie krótkiego uzasadnienia do raportu
+        uzasadnienie = f"RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedźwiedzi'} | Sentyment NLP: {avg_sent:.2f}"
+        return True, ostatnia_cena, float(atr), silnik, uzasadnienie
             
-    return False, ostatnia_cena, float(atr), silnik
+    return False, ostatnia_cena, float(atr), silnik, ""
 
 def uruchom_automatyzacje():
-    print("🛡️ Uruchamiam bota (Trailing Stop + Vol Filter + FinBERT + S&P500 + T212 API)...")
+    print("🛡️ Uruchamiam bota (Pełna agregacja raportu DEV)...")
+    
+    # --- ZMIENNE AGREGUJĄCE DANE DO JEDNEGO RAPORTU ---
+    raport_otwarte_pozycje = ""
+    raport_trailing_stop = ""
+    
     free_cash, total_capital = pobierz_stan_konta()
     print(f"💰 Wolne środki: {free_cash:.2f} PLN | Całkowity kapitał: {total_capital:.2f} PLN")
     
@@ -236,13 +237,7 @@ def uruchom_automatyzacje():
 
     print("\n🌎 Analizuję stan szerokiego rynku (Indeks S&P 500)...")
     rynek_rosnie, spy_cena, spy_sma50 = analizuj_szeroki_rynek()
-    
-    if rynek_rosnie:
-        print("✅ Szeroki rynek WZROSTOWY. Akceptuję longi.")
-    else:
-        print("⚠️ Szeroki rynek SPADKOWY. Otwieranie longów zablokowane.")
 
-    # --- NOWOŚĆ: KONTROLA TRAILING STOP DLA OTWARTYCH POZYCJI ---
     print("\n🛡️ Analizuję otwarte pozycje w poszukiwaniu okazji do Trailing Stopa (ochrona zysków)...")
     otwarte_szczegoly = pobierz_otwarte_pozycje_szczegoly()
     posiadane_tickery = []
@@ -268,32 +263,20 @@ def uruchom_automatyzacje():
                         sma20_ts = float(df_ts['SMA20'].iloc[-1])
                         
                         if cena_ts < sma20_ts:
-                            print(f"🚨 [TRAILING STOP] {nazwa_spolki}: Cena spadła poniżej SMA20! Zysk maleje.")
-                            wiadomosc_ts = (
-                                f"🚨 *TRAILING STOP ALERT (Ochrona Zysku)*\n\n"
-                                f"Twoja pozycja na *{nazwa_spolki}* ({tckr}) zaczyna słabnąć.\n"
-                                f"- Aktualna Cena: `{cena_ts:.2f} USD` (Spadek poniżej średniej SMA20)\n"
-                                f"- Obecny, niezrealizowany zysk: `+{zysk_pln:.2f} PLN`\n\n"
-                                f"💡 *Sugestia AI:* Trend wzrostowy został złamany. Rozważ zalogowanie do aplikacji brokera i ręczne zamknięcie pozycji, aby bezpiecznie skasować ten zysk!"
-                            )
-                            wyslij_telegram(wiadomosc_ts)
-                        else:
-                            print(f"🟢 [HOLD] {nazwa_spolki} bezpieczny w trendzie. Zysk rośnie: {zysk_pln:.2f} PLN.")
+                            print(f"🚨 [TRAILING STOP] {nazwa_spolki}: Cena spadła poniżej SMA20!")
+                            # Dodajemy alert do agregatora
+                            raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20. Obecny zysk: `+{zysk_pln:.2f} PLN`. Zalecane ręczne zabezpieczenie zysku!\n"
 
     for nazwa, info in aktywa_do_handlu.items():
         print(f"\nSkupiam się na: {nazwa}...")
         
         if info["t212"] in posiadane_tickery:
-            print(f"🟡 POMINIĘCIE: Masz już otwartą pozycję na {nazwa} ({info['t212']}). Szukam dalej.")
             continue
             
-        sygnal, cena_usd, atr_usd, uzyty_silnik = analizuj_aktywo(nazwa, info["yf"], info["search"])
+        sygnal, cena_usd, atr_usd, uzyty_silnik, uzasadnienie = analizuj_aktywo(nazwa, info["yf"], info["search"])
         
         if sygnal:
-            print(f"🟢 POTWIERDZONY SYGNAŁ KUPNA DLA {nazwa}!")
-            
             if not rynek_rosnie:
-                print(f"🛑 ZIGNOROWANO ZAKUP: S&P 500 jest w trendzie spadkowym.")
                 continue
             
             ryzyko_max_pln = total_capital * 0.015
@@ -308,47 +291,48 @@ def uruchom_automatyzacje():
             wolumen = min(liczba_z_ryzyka, liczba_z_kapitalu)
             
             if wolumen < 1:
-                print(f"🟡 Pomięcie {nazwa}: Akcja zbyt droga.")
                 continue
             
             szacowany_koszt_usd = wolumen * cena_usd
             szacowany_koszt_pln = szacowany_koszt_usd * kurs_usd_pln
             
             if szacowany_koszt_pln > free_cash:
-                print(f"⛔ Blokada kapitału: Brak wolnych środków.")
                 continue
             
             poziom_sl = cena_usd - roznica_sl_usd
             poziom_tp = cena_usd + (roznica_sl_usd * 2.0)
                 
-            print(f"✅ Zlecenie: {wolumen} sztuk | SL: {poziom_sl:.2f}$ | TP: {poziom_tp:.2f}$")
-            
             sukces, wynik = otwórz_pozycje_demo(info["t212"], wolumen, poziom_sl, poziom_tp)
             
             if sukces:
-                print(f"🚀 SUKCES: Wysłano zlecenie z ochroną SL/TP! Status: {wynik.get('status')}")
+                print(f"🚀 SUKCES: {nazwa} - Wysłano zlecenie!")
+                notatka_blokady = " (⚠️ Zmniejszono do 10% kapitału)" if (wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka) else ""
                 
-                notatka_blokady = ""
-                if wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka:
-                    notatka_blokady = "\n⚠️ _Zadziałała blokada 10% kapitału_"
-                
-                wiada = (
-                    f"🤖 *Copilot DEV (Trading 212)*\n\n"
-                    f"✅ *Otwarto nową pozycję (AUTO SL/TP)!*\n"
-                    f"- Aktywo: *{nazwa}*\n"
-                    f"- Wolumen: `{wolumen}` szt.\n"
-                    f"- Koszt: ok. `{szacowany_koszt_usd:.2f} USD`\n"
-                    f"- 🛑 Stop Loss: `{poziom_sl:.2f} USD`\n"
-                    f"- 🎯 Take Profit: `{poziom_tp:.2f} USD`\n"
-                    f"🧠 Analiza NLP: _{uzyty_silnik}_\n"
-                    f"📊 Filtr Wolumenu: _Potwierdzony (Trend Siły)_\n"
-                    f"{notatka_blokady}"
+                # Dodajemy info o nowej pozycji do agregatora
+                raport_otwarte_pozycje += (
+                    f"✅ *{nazwa}* — `{wolumen}` szt. {notatka_blokady}\n"
+                    f"   🔸 *Zabezpieczenia:* SL `{poziom_sl:.2f}$` | TP `{poziom_tp:.2f}$`\n"
+                    f"   💡 *Uzasadnienie:* Silny trend 1D/1W, wysoki wolumen. {uzasadnienie}\n\n"
                 )
-                wyslij_telegram(wiada)
-            else:
-                print(f"❌ Odrzucono zlecenie: {wynik}")
-        else:
-            print(f"🟡 Czekam na lepsze warunki dla {nazwa}.")
+
+    # --- WYSYŁKA ZBIORCZEGO RAPORTU DZIENNEGO ---
+    print("\n📩 Generowanie i wysyłanie raportu na Telegram...")
+    
+    wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV)* 📊\n\n"
+    
+    if not rynek_rosnie:
+         wiadomosc_koncowa += "⚠️ *Filtr S&P 500:* Rynek znajduje się w trendzie spadkowym. Szukanie nowych pozycji długich (LONG) zostało na dziś zablokowane.\n\n"
+         
+    if raport_trailing_stop == "" and raport_otwarte_pozycje == "":
+        wiadomosc_koncowa += "💤 *Brak nowych akcji na dziś.*\nSystem nie znalazł bezpiecznych okazji spełniających restrykcyjne kryteria i nie wykrył zagrożeń dla otwartych pozycji."
+    else:
+        if raport_trailing_stop:
+            wiadomosc_koncowa += "🛡️ *ALERTY TRAILING STOP (Ochrona Zysku)*\n" + raport_trailing_stop + "\n"
+        if raport_otwarte_pozycje:
+            wiadomosc_koncowa += "🚀 *NOWE POZYCJE (KONTO DEMO)*\n" + raport_otwarte_pozycje
+            
+    wyslij_telegram(wiadomosc_koncowa)
+    print("✅ Zakończono działanie skryptu i wysłano raport!")
 
 if __name__ == "__main__":
     uruchom_automatyzacje()
