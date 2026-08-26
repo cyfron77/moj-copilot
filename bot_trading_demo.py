@@ -61,7 +61,6 @@ def pobierz_stan_konta():
         print(f"Błąd konta: {e}")
     return 0.0, 0.0
 
-# --- NOWOŚĆ: Pobieranie listy aktualnie posiadanych aktywów ---
 def pobierz_otwarte_pozycje():
     url = f"{T212_BASE_URL}/positions"
     try:
@@ -79,9 +78,15 @@ def pobierz_otwarte_pozycje():
         print(f"Błąd pobierania pozycji: {e}")
     return []
 
-def otwórz_pozycje_demo(ticker, quantity):
+# --- NOWOŚĆ: Funkcja zlecenia przyjmuje teraz ceny Stop Loss i Take Profit ---
+def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
     url = f"{T212_BASE_URL}/orders/market"
-    payload = {"quantity": quantity, "ticker": ticker}
+    payload = {
+        "quantity": quantity, 
+        "ticker": ticker,
+        "stopLoss": round(sl_price, 2),
+        "takeProfit": round(tp_price, 2)
+    }
     response = requests.post(url, json=payload, auth=(T212_API_KEY, T212_API_SECRET))
     return response.status_code == 200, response.json()
 
@@ -159,16 +164,14 @@ def uruchom_automatyzacje():
         
     print(f"💱 Aktualny kurs USD/PLN pobrany przez bota: {kurs_usd_pln:.4f}")
 
-    # Pobieramy listę już otwartych pozycji, by uniknąć duplikatów
     posiadane_aktywa = pobierz_otwarte_pozycje()
     print(f"📂 Aktualnie posiadane tickery w portfelu: {posiadane_aktywa}")
 
     for nazwa, info in aktywa_do_handlu.items():
         print(f"\nSkupiam się na: {nazwa}...")
         
-        # --- BLOKADA DUPLIKATÓW ---
         if info["t212"] in posiadane_aktywa:
-            print(f"🟡 POMINIĘCIE: Masz już otwartą pozycję na {nazwa} ({info['t212']}). Szukam dalej w celu dywersyfikacji.")
+            print(f"🟡 POMINIĘCIE: Masz już otwartą pozycję na {nazwa} ({info['t212']}). Szukam dalej.")
             continue
             
         sygnal, cena_usd, atr_usd = analizuj_aktywo(nazwa, info["yf"], info["search"])
@@ -176,6 +179,7 @@ def uruchom_automatyzacje():
         if sygnal:
             print(f"🟢 MOCNY SYGNAŁ KUPNA DLA {nazwa}!")
             
+            # Limity i wielkość pozycji
             ryzyko_max_pln = total_capital * 0.015
             ryzyko_max_usd = ryzyko_max_pln / kurs_usd_pln
             roznica_sl_usd = atr_usd * 2.0
@@ -188,21 +192,27 @@ def uruchom_automatyzacje():
             wolumen = min(liczba_z_ryzyka, liczba_z_kapitalu)
             
             if wolumen < 1:
-                print(f"🟡 Pomięcie {nazwa}: Akcja jest zbyt droga, by wejść bezpiecznie (minimum 1 sztuka przekracza narzucone limity kapitałowe).")
+                print(f"🟡 Pomięcie {nazwa}: Akcja zbyt droga na bezpieczne wejście.")
                 continue
             
             szacowany_koszt_usd = wolumen * cena_usd
             szacowany_koszt_pln = szacowany_koszt_usd * kurs_usd_pln
             
             if szacowany_koszt_pln > free_cash:
-                print(f"⛔ Blokada kapitału: Szacowany koszt ({szacowany_koszt_pln:.2f} PLN) przewyższa wolne środki ({free_cash:.2f} PLN).")
+                print(f"⛔ Blokada kapitału: Szacowany koszt ({szacowany_koszt_pln:.2f} PLN) przewyższa wolne środki.")
                 continue
+            
+            # --- NOWOŚĆ: Wyliczanie absolutnych poziomów SL i TP ---
+            poziom_sl = cena_usd - roznica_sl_usd
+            poziom_tp = cena_usd + (roznica_sl_usd * 2.0) # Take Profit 2x większy niż ryzyko (R:R 1:2)
                 
-            print(f"✅ Kalkulacja OK. Zlecenie na {wolumen} sztuk (Szacowany koszt: {szacowany_koszt_pln:.2f} PLN).")
-            sukces, wynik = otwórz_pozycje_demo(info["t212"], wolumen)
+            print(f"✅ Zlecenie: {wolumen} sztuk | SL: {poziom_sl:.2f}$ | TP: {poziom_tp:.2f}$")
+            
+            # Wysłanie zlecenia powiązanego do Trading 212
+            sukces, wynik = otwórz_pozycje_demo(info["t212"], wolumen, poziom_sl, poziom_tp)
             
             if sukces:
-                print(f"🚀 SUKCES: Wysłano zlecenie! Status: {wynik.get('status')}")
+                print(f"🚀 SUKCES: Wysłano zlecenie z ochroną SL/TP! Status: {wynik.get('status')}")
                 
                 notatka_blokady = ""
                 if wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka:
@@ -210,10 +220,12 @@ def uruchom_automatyzacje():
                 
                 wiada = (
                     f"🤖 *Copilot DEV (Trading 212)*\n\n"
-                    f"✅ *Otwarto nową pozycję!*\n"
+                    f"✅ *Otwarto nową pozycję (AUTO SL/TP)!*\n"
                     f"- Aktywo: *{nazwa}*\n"
                     f"- Wolumen: `{wolumen}` szt.\n"
-                    f"- Koszt: `{szacowany_koszt_pln:.2f} PLN` (ok. `{szacowany_koszt_usd:.2f} USD`)"
+                    f"- Koszt: ok. `{szacowany_koszt_usd:.2f} USD`\n"
+                    f"- 🛑 Stop Loss: `{poziom_sl:.2f} USD`\n"
+                    f"- 🎯 Take Profit: `{poziom_tp:.2f} USD`"
                     f"{notatka_blokady}"
                 )
                 wyslij_telegram(wiada)
