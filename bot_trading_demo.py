@@ -35,7 +35,6 @@ def wyslij_telegram(wiadomosc):
 
 # Mapa aktywów: Ticker dla API brokera -> Ticker dla Yahoo Finance
 aktywa_do_handlu = {
-    # --- GIGANCI TECHNOLOGICZNI ---
     "NVIDIA": {"t212": "NVDA_US_EQ", "yf": "NVDA", "search": "NVIDIA stock news"},
     "Apple": {"t212": "AAPL_US_EQ", "yf": "AAPL", "search": "Apple stock market news"},
     "Microsoft": {"t212": "MSFT_US_EQ", "yf": "MSFT", "search": "Microsoft stock news"},
@@ -43,14 +42,10 @@ aktywa_do_handlu = {
     "Alphabet (Google)": {"t212": "GOOGL_US_EQ", "yf": "GOOGL", "search": "Google stock market news"},
     "Amazon": {"t212": "AMZN_US_EQ", "yf": "AMZN", "search": "Amazon stock market news"},
     "Meta (Facebook)": {"t212": "META_US_EQ", "yf": "META", "search": "Meta Facebook stock news"},
-    
-    # --- FINANSE I TRADYCYJNY BIZNES ---
     "JPMorgan": {"t212": "JPM_US_EQ", "yf": "JPM", "search": "JPMorgan stock market news"},
     "Visa": {"t212": "V_US_EQ", "yf": "V", "search": "Visa stock market news"},
     "Coca-Cola": {"t212": "KO_US_EQ", "yf": "KO", "search": "Coca Cola stock news"},
     "Disney": {"t212": "DIS_US_EQ", "yf": "DIS", "search": "Disney stock news"},
-    
-    # --- SZEROKIE ETF-Y ---
     "S&P 500 ETF": {"t212": "SPY_US_EQ", "yf": "SPY", "search": "S&P 500 index market today"},
     "Nasdaq 100 ETF": {"t212": "QQQ_US_EQ", "yf": "QQQ", "search": "Nasdaq 100 ETF market"}
 }
@@ -153,30 +148,51 @@ def uruchom_automatyzacje():
         if sygnal:
             print(f"🟢 MOCNY SYGNAŁ KUPNA DLA {nazwa}!")
             
-            ryzyko_max_pln = total_capital * 0.015
-            ryzyko_max_usd = ryzyk_max_usd_val = ryzyko_max_pln / kurs_usd_pln
-            roznica_sl_usd = atr_usd * 2.0
+            # --- ZMODYFIKOWANY SYSTEM RYZYKA (BLOKADA 10%) ---
             
-            wolumen = max(1, int(ryzyk_max_usd_val / roznica_sl_usd))
+            # 1. Wyliczenie z tytułu ryzyka na Stop Loss (max 1.5%)
+            ryzyko_max_pln = total_capital * 0.015
+            ryzyko_max_usd = ryzyko_max_pln / kurs_usd_pln
+            roznica_sl_usd = atr_usd * 2.0
+            liczba_z_ryzyka = int(ryzyko_max_usd / roznica_sl_usd) if roznica_sl_usd > 0 else 0
+            
+            # 2. Wyliczenie z tytułu twardej blokady kapitału (max 10%)
+            max_kapital_na_pozycje_pln = total_capital * 0.10
+            max_kapital_na_pozycje_usd = max_kapital_na_pozycje_pln / kurs_usd_pln
+            liczba_z_kapitalu = int(max_kapital_na_pozycje_usd / cena_usd) if cena_usd > 0 else 0
+            
+            # 3. Bot wybiera zawsze bezpieczniejszy wolumen
+            wolumen = min(liczba_z_ryzyka, liczba_z_kapitalu)
+            
+            if wolumen < 1:
+                print(f"🟡 Pomięcie {nazwa}: Akcja jest zbyt droga, by wejść bezpiecznie (minimum 1 sztuka przekracza narzucone limity kapitałowe).")
+                continue
+            
             szacowany_koszt_usd = wolumen * cena_usd
             szacowany_koszt_pln = szacowany_koszt_usd * kurs_usd_pln
             
             if szacowany_koszt_pln > free_cash:
-                print(f"⛔ Blokada kapitału: Szacowany koszt ({szacowany_koszt_pln:.2f} PLN) przewyższa gotówkę.")
+                print(f"⛔ Blokada kapitału: Szacowany koszt ({szacowany_koszt_pln:.2f} PLN) przewyższa wolne środki ({free_cash:.2f} PLN).")
                 continue
                 
-            print(f"✅ Kalkulacja OK. Zlecenie na {wolumen} sztuk.")
+            print(f"✅ Kalkulacja OK. Zlecenie na {wolumen} sztuk (Szacowany koszt: {szacowany_koszt_pln:.2f} PLN).")
             sukces, wynik = otwórz_pozycje_demo(info["t212"], wolumen)
             
             if sukces:
                 print(f"🚀 SUKCES: Wysłano zlecenie! Status: {wynik.get('status')}")
-                # Wysłanie powiadomienia na dedykowany kanał Telegram DEV
+                
+                # Dodatkowa adnotacja do powiadomienia, jeśli zadziałała blokada
+                notatka_blokady = ""
+                if wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka:
+                    notatka_blokady = "\n⚠️ _Zadziałała blokada 10% kapitału_"
+                
                 wiada = (
                     f"🤖 *Copilot DEV (Trading 212)*\n\n"
-                    f"✅ *Otwarto nową pozycję!รายการ*\n"
-                    f"- Aktywo: *{nazwa}* (`{info['t212']}`)\n"
+                    f"✅ *Otwarto nową pozycję!*\n"
+                    f"- Aktywo: *{nazwa}*\n"
                     f"- Wolumen: `{wolumen}` szt.\n"
-                    f"- Szacowany koszt: `{szacowany_koszt_usd:.2f} USD` (`{szacowany_koszt_pln:.2f} PLN`)"
+                    f"- Koszt: `{szacowany_koszt_pln:.2f} PLN` (ok. `{szacowany_koszt_usd:.2f} USD`)"
+                    f"{notatka_blokady}"
                 )
                 wyslij_telegram(wiada)
             else:
