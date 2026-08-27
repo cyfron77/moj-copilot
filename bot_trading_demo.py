@@ -75,8 +75,8 @@ def analizuj_sentyment_bielik(tytuly, token):
     if not token:
         return 0.0, "Brak klucza HF"
         
-    # Stabilny adres API (router) współdzielony z FinBERTem
-    url = "https://router.huggingface.co/hf-inference/models/speakleash/Bielik-7B-Instruct-v0.1"
+    # Zmieniono na klasyczny, oficjalny adres dla modeli społecznościowych (Free Tier)
+    url = "https://api-inference.huggingface.co/models/speakleash/Bielik-7B-Instruct-v0.1"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     
     tekst_newsow = "\n".join([f"- {t}" for t in tytuly])
@@ -88,13 +88,12 @@ def analizuj_sentyment_bielik(tytuly, token):
         f"Wiadomości:\n{tekst_newsow}\n\nOcena:"
     )
     
-    # Skonfigurowany, rygorystyczny payload z komendą wymuszającą oczekiwanie na model
+    # Oczyszczony i w 100% zgodny ze standardem payload API Text-Generation
     payload = {
         "inputs": prompt,
         "parameters": {
             "max_new_tokens": 10,
-            "return_full_text": False,
-            "do_sample": False
+            "return_full_text": False
         },
         "options": {
             "wait_for_model": True
@@ -106,7 +105,6 @@ def analizuj_sentyment_bielik(tytuly, token):
         
         if response.status_code == 200:
             wynik = response.json()
-            # Bezpieczne wyciąganie tekstu z różnych struktur odpowiedzi
             if isinstance(wynik, list) and len(wynik) > 0:
                 wygenerowany_tekst = wynik[0].get("generated_text", "").strip()
             elif isinstance(wynik, dict):
@@ -121,17 +119,23 @@ def analizuj_sentyment_bielik(tytuly, token):
                 return score, "Bielik 🦅"
             else:
                 return 0.0, "Bielik 🦅 (Zły format)"
+                
         elif response.status_code == 503:
             return 0.0, "Bielik 🦅 (Wybudzanie ⏳)"
         else:
-            return 0.0, f"Bielik (Błąd: {response.status_code})"
+            # Automatyczna diagnostyka: Pobiera dokładny tekst błędu z serwerów Hugging Face
+            try:
+                error_details = response.json().get("error", "Nieznany błąd API")
+                error_details = str(error_details)[:25] # Skracamy do 25 znaków do logów
+            except:
+                error_details = f"HTTP {response.status_code}"
+            return 0.0, f"Bielik ({error_details})"
             
     except requests.exceptions.Timeout:
         return 0.0, "Bielik (Timeout ⏳)"
     except Exception as e:
-        # Pokażemy krótką nazwę błędu (np. ConnectionError) zamiast długiego łańcucha
         error_msg = type(e).__name__ 
-        return 0.0, f"Bielik (Błąd: {error_msg})"
+        return 0.0, f"Bielik (Wyjątek: {error_msg})"
 
 # Mapa aktywów
 aktywa_do_handlu = {
@@ -252,7 +256,6 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
 
     clean_q = query.replace(" ", "+")
     
-    # --- HYBRYDOWY MÓZG (ROUTING AI) ---
     if symbol_yf.endswith(".WA") or "VWCE" in symbol_yf:
         rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=pl&gl=PL&ceid=PL:pl"
         feed = feedparser.parse(rss_url)
