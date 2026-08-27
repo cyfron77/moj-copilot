@@ -75,7 +75,8 @@ def analizuj_sentyment_bielik(tytuly, token):
     if not token:
         return 0.0, "Brak klucza HF"
         
-    url = "https://api-inference.huggingface.co/models/speakleash/Bielik-7B-Instruct-v0.1"
+    # Stabilny adres API (router) współdzielony z FinBERTem
+    url = "https://router.huggingface.co/hf-inference/models/speakleash/Bielik-7B-Instruct-v0.1"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     
     tekst_newsow = "\n".join([f"- {t}" for t in tytuly])
@@ -87,12 +88,16 @@ def analizuj_sentyment_bielik(tytuly, token):
         f"Wiadomości:\n{tekst_newsow}\n\nOcena:"
     )
     
-    # Usunięto problematyczny parametr 'temperature' - model będzie teraz 100% analityczny i stabilny
+    # Skonfigurowany, rygorystyczny payload z komendą wymuszającą oczekiwanie na model
     payload = {
         "inputs": prompt,
         "parameters": {
             "max_new_tokens": 10,
-            "return_full_text": False
+            "return_full_text": False,
+            "do_sample": False
+        },
+        "options": {
+            "wait_for_model": True
         }
     }
     
@@ -101,8 +106,14 @@ def analizuj_sentyment_bielik(tytuly, token):
         
         if response.status_code == 200:
             wynik = response.json()
-            wygenerowany_tekst = wynik[0].get("generated_text", "").strip()
-            
+            # Bezpieczne wyciąganie tekstu z różnych struktur odpowiedzi
+            if isinstance(wynik, list) and len(wynik) > 0:
+                wygenerowany_tekst = wynik[0].get("generated_text", "").strip()
+            elif isinstance(wynik, dict):
+                wygenerowany_tekst = wynik.get("generated_text", "").strip()
+            else:
+                wygenerowany_tekst = str(wynik)
+                
             dopasowanie = re.search(r"-?\d+\.\d+|-?\d+", wygenerowany_tekst)
             if dopasowanie:
                 score = float(dopasowanie.group())
@@ -118,43 +129,10 @@ def analizuj_sentyment_bielik(tytuly, token):
     except requests.exceptions.Timeout:
         return 0.0, "Bielik (Timeout ⏳)"
     except Exception as e:
-        error_msg = str(e)[:15]
+        # Pokażemy krótką nazwę błędu (np. ConnectionError) zamiast długiego łańcucha
+        error_msg = type(e).__name__ 
         return 0.0, f"Bielik (Błąd: {error_msg})"
-    
-    payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 10,
-            "temperature": 0.01,
-            "return_full_text": False
-        }
-    }
-    
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=70)
-        
-        if response.status_code == 200:
-            wynik = response.json()
-            wygenerowany_tekst = wynik[0].get("generated_text", "").strip()
-            
-            dopasowanie = re.search(r"-?\d+\.\d+|-?\d+", wygenerowany_tekst)
-            if dopasowanie:
-                score = float(dopasowanie.group())
-                score = max(-1.0, min(1.0, score))
-                return score, "Bielik 🦅"
-            else:
-                return 0.0, "Bielik 🦅 (Zły format)"
-        elif response.status_code == 503:
-            return 0.0, "Bielik 🦅 (Wybudzanie ⏳)"
-        else:
-            return 0.0, f"Bielik (Odrzucono: {response.status_code})"
-            
-    except requests.exceptions.Timeout:
-        return 0.0, "Bielik (Timeout ⏳)"
-    except Exception as e:
-        error_msg = str(e)[:15]
-        return 0.0, f"Bielik (Błąd: {error_msg})"
-        
+
 # Mapa aktywów
 aktywa_do_handlu = {
     "Apple": {"t212": "AAPL_US_EQ", "yf": "AAPL", "search": "Apple stock market news"},
