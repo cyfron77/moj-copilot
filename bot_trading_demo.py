@@ -38,7 +38,9 @@ def wyslij_telegram(wiadomosc):
 
 # --- BRAMKA FINBERT DLA BOTA ---
 def analizuj_sentyment_finbert(tytuly, token):
-    if not token or not tytuly:
+    if not tytuly:
+        return [], "Brak newsów 📭"
+    if not token:
         return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Brak klucza)"
     
     url = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
