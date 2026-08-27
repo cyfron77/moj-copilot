@@ -23,10 +23,11 @@ jobs:
         run: |
           pip install requests pandas numpy yfinance feedparser textblob
 
-      - name: Uruchomienie skryptu handlu demo
+- name: Uruchomienie skryptu handlu demo
         env:
           T212_API_KEY: ${{ secrets.T212_API_KEY }}
           T212_API_SECRET: ${{ secrets.T212_API_SECRET }}
+          HF_API_TOKEN: ${{ secrets.HF_API_TOKEN }}
           TG_TOKEN_DEV: ${{ secrets.TG_TOKEN_DEV }}
           TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python bot_trading_demo.py
