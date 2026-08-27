@@ -75,8 +75,7 @@ def analizuj_sentyment_bielik(tytuly, token):
     if not token:
         return 0.0, "Brak klucza HF"
         
-    # Zaktualizowany adres API (nowy router) oraz lżejsza, stabilniejsza wersja Bielika (7B)
-    url = "https://router.huggingface.co/hf-inference/models/speakleash/Bielik-7B-Instruct-v0.1"
+    url = "https://api-inference.huggingface.co/models/speakleash/Bielik-7B-Instruct-v0.1"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     
     tekst_newsow = "\n".join([f"- {t}" for t in tytuly])
@@ -87,6 +86,40 @@ def analizuj_sentyment_bielik(tytuly, token):
         "Zero oznacza neutralny. Nie pisz żadnych słów, tylko samą liczbę.\n\n"
         f"Wiadomości:\n{tekst_newsow}\n\nOcena:"
     )
+    
+    # Usunięto problematyczny parametr 'temperature' - model będzie teraz 100% analityczny i stabilny
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 10,
+            "return_full_text": False
+        }
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=70)
+        
+        if response.status_code == 200:
+            wynik = response.json()
+            wygenerowany_tekst = wynik[0].get("generated_text", "").strip()
+            
+            dopasowanie = re.search(r"-?\d+\.\d+|-?\d+", wygenerowany_tekst)
+            if dopasowanie:
+                score = float(dopasowanie.group())
+                score = max(-1.0, min(1.0, score))
+                return score, "Bielik 🦅"
+            else:
+                return 0.0, "Bielik 🦅 (Zły format)"
+        elif response.status_code == 503:
+            return 0.0, "Bielik 🦅 (Wybudzanie ⏳)"
+        else:
+            return 0.0, f"Bielik (Błąd: {response.status_code})"
+            
+    except requests.exceptions.Timeout:
+        return 0.0, "Bielik (Timeout ⏳)"
+    except Exception as e:
+        error_msg = str(e)[:15]
+        return 0.0, f"Bielik (Błąd: {error_msg})"
     
     payload = {
         "inputs": prompt,
