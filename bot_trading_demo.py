@@ -75,7 +75,8 @@ def analizuj_sentyment_bielik(tytuly, token):
     if not token:
         return 0.0, "Brak klucza HF"
         
-    url = "https://api-inference.huggingface.co/models/speakleash/Bielik-11B-v2.2-Instruct"
+    # Zaktualizowany adres API (nowy router) oraz lżejsza, stabilniejsza wersja Bielika (7B)
+    url = "https://router.huggingface.co/hf-inference/models/speakleash/Bielik-7B-Instruct-v0.1"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     
     tekst_newsow = "\n".join([f"- {t}" for t in tytuly])
@@ -97,7 +98,6 @@ def analizuj_sentyment_bielik(tytuly, token):
     }
     
     try:
-        # POTĘŻNY TIMEOUT: Dajemy modelowi aż 70 sekund na wybudzenie się i załadowanie do RAMu
         response = requests.post(url, headers=headers, json=payload, timeout=70)
         
         if response.status_code == 200:
@@ -119,10 +119,9 @@ def analizuj_sentyment_bielik(tytuly, token):
     except requests.exceptions.Timeout:
         return 0.0, "Bielik (Timeout ⏳)"
     except Exception as e:
-        # Pokażemy dokładnie jaki inny błąd wystąpił
         error_msg = str(e)[:15]
         return 0.0, f"Bielik (Błąd: {error_msg})"
-
+        
 # Mapa aktywów
 aktywa_do_handlu = {
     "Apple": {"t212": "AAPL_US_EQ", "yf": "AAPL", "search": "Apple stock market news"},
