@@ -47,26 +47,34 @@ def analizuj_sentyment_finbert(tytuly, token):
     url = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
     headers = {"Authorization": f"Bearer {token}"}
     
-    try:
-        response = requests.post(url, headers=headers, json={"inputs": tytuly}, timeout=20)
-        if response.status_code == 200:
-            wyniki = response.json()
-            scores = []
-            for res in wyniki:
-                najlepszy = max(res, key=lambda x: x['score'])
-                if najlepszy['label'] == 'positive':
-                    scores.append(najlepszy['score'])
-                elif najlepszy['label'] == 'negative':
-                    scores.append(-najlepszy['score'])
-                else:
-                    scores.append(0.0)
-            return scores, "FinBERT 🧠"
-        elif response.status_code == 503:
-            return [0.0] * len(tytuly), "FinBERT (Wybudzanie ⏳)"
-        else:
-            return [0.0] * len(tytuly), f"FinBERT (Błąd {response.status_code})"
-    except Exception:
-        return [0.0] * len(tytuly), "FinBERT (Błąd połączenia)"
+    # SYSTEM 3 ŻYĆ (Auto-Retry dla FinBERTa)
+    for proba in range(3):
+        try:
+            response = requests.post(url, headers=headers, json={"inputs": tytuly}, timeout=20)
+            if response.status_code == 200:
+                wyniki = response.json()
+                scores = []
+                for res in wyniki:
+                    najlepszy = max(res, key=lambda x: x['score'])
+                    if najlepszy['label'] == 'positive':
+                        scores.append(najlepszy['score'])
+                    elif najlepszy['label'] == 'negative':
+                        scores.append(-najlepszy['score'])
+                    else:
+                        scores.append(0.0)
+                return scores, "FinBERT 🧠"
+            elif response.status_code == 503:
+                time.sleep(3) # Czekamy i ponawiamy
+                continue
+            else:
+                return [0.0] * len(tytuly), f"FinBERT (Błąd {response.status_code})"
+        except requests.exceptions.ConnectionError:
+            time.sleep(3) # Chwilowy ban sieciowy, czekamy
+            continue
+        except Exception:
+            return [0.0] * len(tytuly), "FinBERT (Błąd API)"
+            
+    return [0.0] * len(tytuly), "FinBERT (Brak połączenia)"
 
 # --- SILNIK 2: BIELIK LLM (DLA GPW / POLSKA) ---
 def analizuj_sentyment_bielik(tytuly, token):
@@ -75,7 +83,6 @@ def analizuj_sentyment_bielik(tytuly, token):
     if not token:
         return 0.0, "Brak klucza HF"
         
-    # Zmieniono na klasyczny, oficjalny adres dla modeli społecznościowych (Free Tier)
     url = "https://api-inference.huggingface.co/models/speakleash/Bielik-7B-Instruct-v0.1"
     headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
     
@@ -88,7 +95,6 @@ def analizuj_sentyment_bielik(tytuly, token):
         f"Wiadomości:\n{tekst_newsow}\n\nOcena:"
     )
     
-    # Oczyszczony i w 100% zgodny ze standardem payload API Text-Generation
     payload = {
         "inputs": prompt,
         "parameters": {
@@ -100,42 +106,45 @@ def analizuj_sentyment_bielik(tytuly, token):
         }
     }
     
-    try:
-        response = requests.post(url, headers=headers, json=payload, timeout=70)
-        
-        if response.status_code == 200:
-            wynik = response.json()
-            if isinstance(wynik, list) and len(wynik) > 0:
-                wygenerowany_tekst = wynik[0].get("generated_text", "").strip()
-            elif isinstance(wynik, dict):
-                wygenerowany_tekst = wynik.get("generated_text", "").strip()
-            else:
-                wygenerowany_tekst = str(wynik)
-                
-            dopasowanie = re.search(r"-?\d+\.\d+|-?\d+", wygenerowany_tekst)
-            if dopasowanie:
-                score = float(dopasowanie.group())
-                score = max(-1.0, min(1.0, score))
-                return score, "Bielik 🦅"
-            else:
-                return 0.0, "Bielik 🦅 (Zły format)"
-                
-        elif response.status_code == 503:
-            return 0.0, "Bielik 🦅 (Wybudzanie ⏳)"
-        else:
-            # Automatyczna diagnostyka: Pobiera dokładny tekst błędu z serwerów Hugging Face
-            try:
-                error_details = response.json().get("error", "Nieznany błąd API")
-                error_details = str(error_details)[:25] # Skracamy do 25 znaków do logów
-            except:
-                error_details = f"HTTP {response.status_code}"
-            return 0.0, f"Bielik ({error_details})"
+    # SYSTEM 3 ŻYĆ (Auto-Retry dla Bielika)
+    for proba in range(3):
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=70)
             
-    except requests.exceptions.Timeout:
-        return 0.0, "Bielik (Timeout ⏳)"
-    except Exception as e:
-        error_msg = type(e).__name__ 
-        return 0.0, f"Bielik (Wyjątek: {error_msg})"
+            if response.status_code == 200:
+                wynik = response.json()
+                if isinstance(wynik, list) and len(wynik) > 0:
+                    wygenerowany_tekst = wynik[0].get("generated_text", "").strip()
+                elif isinstance(wynik, dict):
+                    wygenerowany_tekst = wynik.get("generated_text", "").strip()
+                else:
+                    wygenerowany_tekst = str(wynik)
+                    
+                dopasowanie = re.search(r"-?\d+\.\d+|-?\d+", wygenerowany_tekst)
+                if dopasowanie:
+                    score = float(dopasowanie.group())
+                    score = max(-1.0, min(1.0, score))
+                    return score, "Bielik 🦅"
+                else:
+                    return 0.0, "Bielik 🦅 (Zły format)"
+                    
+            elif response.status_code == 503:
+                time.sleep(5) # Model wstaje, damy mu chwilę
+                continue
+            else:
+                return 0.0, f"Bielik (Odrzucono: {response.status_code})"
+                
+        except requests.exceptions.ConnectionError:
+            time.sleep(3) # Ban antyspamowy, czekamy
+            continue
+        except requests.exceptions.Timeout:
+            time.sleep(3)
+            continue
+        except Exception as e:
+            error_msg = type(e).__name__ 
+            return 0.0, f"Bielik (Wyjątek: {error_msg})"
+            
+    return 0.0, "Bielik (Limit prób)"
 
 # Mapa aktywów
 aktywa_do_handlu = {
@@ -342,6 +351,9 @@ def uruchom_automatyzacje():
 
     for nazwa, info in aktywa_do_handlu.items():
         print(f"\nSkupiam się na: {nazwa}...")
+        
+        # HAMULEC CZASOWY: Zapobiega banom za spam (DDoS)
+        time.sleep(2.5) 
         
         if info["t212"] in posiadane_tickery: continue
             
