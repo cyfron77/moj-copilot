@@ -6,7 +6,6 @@ import numpy as np
 import yfinance as yf
 import feedparser
 from textblob import TextBlob
-import re
 
 # Konfiguracja API Trading 212 (Środowisko Demo)
 T212_API_KEY = os.getenv("T212_API_KEY")
@@ -17,7 +16,7 @@ T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
 TG_TOKEN = os.getenv("TG_TOKEN_DEV")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 
-# Konfiguracja Hugging Face (FinBERT & Bielik)
+# Konfiguracja Hugging Face (FinBERT & XLM-RoBERTa)
 HF_TOKEN = os.getenv("HF_API_TOKEN")
 
 def wyslij_telegram(wiadomosc):
@@ -47,7 +46,6 @@ def analizuj_sentyment_finbert(tytuly, token):
     url = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
     headers = {"Authorization": f"Bearer {token}"}
     
-    # SYSTEM 3 ŻYĆ (Auto-Retry dla FinBERTa)
     for proba in range(3):
         try:
             response = requests.post(url, headers=headers, json={"inputs": tytuly}, timeout=20)
@@ -64,87 +62,70 @@ def analizuj_sentyment_finbert(tytuly, token):
                         scores.append(0.0)
                 return scores, "FinBERT 🧠"
             elif response.status_code == 503:
-                time.sleep(3) # Czekamy i ponawiamy
+                time.sleep(3)
                 continue
             else:
                 return [0.0] * len(tytuly), f"FinBERT (Błąd {response.status_code})"
         except requests.exceptions.ConnectionError:
-            time.sleep(3) # Chwilowy ban sieciowy, czekamy
+            time.sleep(3)
             continue
         except Exception:
             return [0.0] * len(tytuly), "FinBERT (Błąd API)"
             
-    return [0.0] * len(tytuly), "FinBERT (Brak połączenia)"
+    return [0.0] * len(tytuly), "FinBERT (Limit prób)"
 
-# --- SILNIK 2: BIELIK LLM (DLA GPW / POLSKA) ---
-def analizuj_sentyment_bielik(tytuly, token):
+# --- SILNIK 2: XLM-RoBERTa (DLA GPW / POLSKA) ---
+def analizuj_sentyment_pl(tytuly, token):
     if not tytuly:
         return 0.0, "Brak newsów 📭"
     if not token:
         return 0.0, "Brak klucza HF"
         
-    url = "https://api-inference.huggingface.co/models/speakleash/Bielik-7B-Instruct-v0.1"
-    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    url = "https://router.huggingface.co/hf-inference/models/cardiffnlp/twitter-xlm-roberta-base-sentiment"
+    headers = {"Authorization": f"Bearer {token}"}
     
-    tekst_newsow = "\n".join([f"- {t}" for t in tytuly])
-    prompt = (
-        "Jesteś profesjonalnym analitykiem Giełdy Papierów Wartościowych w Warszawie. "
-        "Oceń ogólny sentyment poniższych nagłówków wiadomości. "
-        "Zwróć TYLKO I WYŁĄCZNIE jedną liczbę z przedziału od -1.0 (bardzo negatywny) do 1.0 (bardzo pozytywny). "
-        "Zero oznacza neutralny. Nie pisz żadnych słów, tylko samą liczbę.\n\n"
-        f"Wiadomości:\n{tekst_newsow}\n\nOcena:"
-    )
-    
-    payload = {
-        "inputs": prompt,
-        "parameters": {
-            "max_new_tokens": 10,
-            "return_full_text": False
-        },
-        "options": {
-            "wait_for_model": True
-        }
-    }
-    
-    # SYSTEM 3 ŻYĆ (Auto-Retry dla Bielika)
     for proba in range(3):
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=70)
-            
+            response = requests.post(url, headers=headers, json={"inputs": tytuly}, timeout=20)
             if response.status_code == 200:
-                wynik = response.json()
-                if isinstance(wynik, list) and len(wynik) > 0:
-                    wygenerowany_tekst = wynik[0].get("generated_text", "").strip()
-                elif isinstance(wynik, dict):
-                    wygenerowany_tekst = wynik.get("generated_text", "").strip()
-                else:
-                    wygenerowany_tekst = str(wynik)
+                wyniki = response.json()
+                scores = []
+                
+                for item in wyniki:
+                    if isinstance(item, list):
+                        najlepszy = max(item, key=lambda x: x.get('score', 0.0))
+                    elif isinstance(item, dict):
+                        najlepszy = item
+                    else:
+                        continue
+                        
+                    label = najlepszy.get('label', '')
+                    score = najlepszy.get('score', 0.0)
                     
-                dopasowanie = re.search(r"-?\d+\.\d+|-?\d+", wygenerowany_tekst)
-                if dopasowanie:
-                    score = float(dopasowanie.group())
-                    score = max(-1.0, min(1.0, score))
-                    return score, "Bielik 🦅"
-                else:
-                    return 0.0, "Bielik 🦅 (Zły format)"
-                    
+                    # XLM-RoBERTa zwraca: LABEL_2 (Pozytywny), LABEL_1 (Neutralny), LABEL_0 (Negatywny)
+                    if label in ['LABEL_2', 'positive', 'POS']:
+                        scores.append(score)
+                    elif label in ['LABEL_0', 'negative', 'NEG']:
+                        scores.append(-score)
+                    else:
+                        scores.append(0.0)
+                        
+                avg = sum(scores) / len(scores) if scores else 0.0
+                return avg, "XLM-RoBERTa 🌍"
+                
             elif response.status_code == 503:
-                time.sleep(5) # Model wstaje, damy mu chwilę
+                time.sleep(3)
                 continue
             else:
-                return 0.0, f"Bielik (Odrzucono: {response.status_code})"
+                return 0.0, f"XLM-RoBERTa (Błąd {response.status_code})"
                 
         except requests.exceptions.ConnectionError:
-            time.sleep(3) # Ban antyspamowy, czekamy
-            continue
-        except requests.exceptions.Timeout:
             time.sleep(3)
             continue
-        except Exception as e:
-            error_msg = type(e).__name__ 
-            return 0.0, f"Bielik (Wyjątek: {error_msg})"
+        except Exception:
+            return 0.0, "XLM-RoBERTa (Błąd API)"
             
-    return 0.0, "Bielik (Limit prób)"
+    return 0.0, "XLM-RoBERTa (Limit prób)"
 
 # Mapa aktywów
 aktywa_do_handlu = {
@@ -269,7 +250,7 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
         rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=pl&gl=PL&ceid=PL:pl"
         feed = feedparser.parse(rss_url)
         tytuly_newsow = [entry.title for entry in feed.entries[:5]] if feed.entries else []
-        avg_sent, silnik = analizuj_sentyment_bielik(tytuly_newsow, HF_TOKEN)
+        avg_sent, silnik = analizuj_sentyment_pl(tytuly_newsow, HF_TOKEN)
     else:
         rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=en-US&gl=US&ceid=US:en"
         feed = feedparser.parse(rss_url)
@@ -352,7 +333,6 @@ def uruchom_automatyzacje():
     for nazwa, info in aktywa_do_handlu.items():
         print(f"\nSkupiam się na: {nazwa}...")
         
-        # HAMULEC CZASOWY: Zapobiega banom za spam (DDoS)
         time.sleep(2.5) 
         
         if info["t212"] in posiadane_tickery: continue
