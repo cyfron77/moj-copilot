@@ -6,7 +6,7 @@ import numpy as np
 import yfinance as yf
 import feedparser
 from textblob import TextBlob
-import re  # Dodane do wyciągania liczby z odpowiedzi Bielika
+import re
 
 # Konfiguracja API Trading 212 (Środowisko Demo)
 T212_API_KEY = os.getenv("T212_API_KEY")
@@ -48,7 +48,7 @@ def analizuj_sentyment_finbert(tytuly, token):
     headers = {"Authorization": f"Bearer {token}"}
     
     try:
-        response = requests.post(url, headers=headers, json={"inputs": tytuly}, timeout=15)
+        response = requests.post(url, headers=headers, json={"inputs": tytuly}, timeout=20)
         if response.status_code == 200:
             wyniki = response.json()
             scores = []
@@ -65,7 +65,7 @@ def analizuj_sentyment_finbert(tytuly, token):
             return [0.0] * len(tytuly), "FinBERT (Wybudzanie ⏳)"
         else:
             return [0.0] * len(tytuly), f"FinBERT (Błąd {response.status_code})"
-    except Exception as e:
+    except Exception:
         return [0.0] * len(tytuly), "FinBERT (Błąd połączenia)"
 
 # --- SILNIK 2: BIELIK LLM (DLA GPW / POLSKA) ---
@@ -97,25 +97,31 @@ def analizuj_sentyment_bielik(tytuly, token):
     }
     
     try:
-        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        # POTĘŻNY TIMEOUT: Dajemy modelowi aż 70 sekund na wybudzenie się i załadowanie do RAMu
+        response = requests.post(url, headers=headers, json=payload, timeout=70)
+        
         if response.status_code == 200:
             wynik = response.json()
             wygenerowany_tekst = wynik[0].get("generated_text", "").strip()
             
-            # Ekstrakcja samej liczby z odpowiedzi (nawet jeśli model dopisze słowa)
             dopasowanie = re.search(r"-?\d+\.\d+|-?\d+", wygenerowany_tekst)
             if dopasowanie:
                 score = float(dopasowanie.group())
-                score = max(-1.0, min(1.0, score)) # Utrzymanie w limitach -1 do 1
+                score = max(-1.0, min(1.0, score))
                 return score, "Bielik 🦅"
             else:
                 return 0.0, "Bielik 🦅 (Zły format)"
         elif response.status_code == 503:
             return 0.0, "Bielik 🦅 (Wybudzanie ⏳)"
         else:
-            return 0.0, f"Bielik (Błąd {response.status_code})"
+            return 0.0, f"Bielik (Odrzucono: {response.status_code})"
+            
+    except requests.exceptions.Timeout:
+        return 0.0, "Bielik (Timeout ⏳)"
     except Exception as e:
-        return 0.0, "Bielik (Błąd API)"
+        # Pokażemy dokładnie jaki inny błąd wystąpił
+        error_msg = str(e)[:15]
+        return 0.0, f"Bielik (Błąd: {error_msg})"
 
 # Mapa aktywów
 aktywa_do_handlu = {
