@@ -6,6 +6,7 @@ import numpy as np
 import yfinance as yf
 import feedparser
 from textblob import TextBlob
+import re  # Dodane do wyciągania liczby z odpowiedzi Bielika
 
 # Konfiguracja API Trading 212 (Środowisko Demo)
 T212_API_KEY = os.getenv("T212_API_KEY")
@@ -16,7 +17,7 @@ T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
 TG_TOKEN = os.getenv("TG_TOKEN_DEV")
 TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 
-# Konfiguracja Hugging Face (FinBERT)
+# Konfiguracja Hugging Face (FinBERT & Bielik)
 HF_TOKEN = os.getenv("HF_API_TOKEN")
 
 def wyslij_telegram(wiadomosc):
@@ -36,12 +37,12 @@ def wyslij_telegram(wiadomosc):
         print(f"Błąd wysyłania Telegrama: {e}")
         return False
 
-# --- BRAMKA FINBERT DLA BOTA (Z POPRAWKĄ NR 1) ---
+# --- SILNIK 1: FINBERT (DLA WALL STREET / USA) ---
 def analizuj_sentyment_finbert(tytuly, token):
     if not tytuly:
         return [], "Brak newsów 📭"
     if not token:
-        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Brak klucza)"
+        return [0.0] * len(tytuly), "Brak klucza HF"
     
     url = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
     headers = {"Authorization": f"Bearer {token}"}
@@ -61,13 +62,62 @@ def analizuj_sentyment_finbert(tytuly, token):
                     scores.append(0.0)
             return scores, "FinBERT 🧠"
         elif response.status_code == 503:
-            return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (FinBERT 503)"
+            return [0.0] * len(tytuly), "FinBERT (Wybudzanie ⏳)"
         else:
-            return [TextBlob(t).sentiment.polarity for t in tytuly], f"TextBlob (Błąd {response.status_code})"
+            return [0.0] * len(tytuly), f"FinBERT (Błąd {response.status_code})"
     except Exception as e:
-        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Błąd połączenia)"
+        return [0.0] * len(tytuly), "FinBERT (Błąd połączenia)"
 
-# Mapa aktywów: Ticker dla API brokera -> Ticker dla Yahoo Finance
+# --- SILNIK 2: BIELIK LLM (DLA GPW / POLSKA) ---
+def analizuj_sentyment_bielik(tytuly, token):
+    if not tytuly:
+        return 0.0, "Brak newsów 📭"
+    if not token:
+        return 0.0, "Brak klucza HF"
+        
+    url = "https://api-inference.huggingface.co/models/speakleash/Bielik-11B-v2.2-Instruct"
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+    
+    tekst_newsow = "\n".join([f"- {t}" for t in tytuly])
+    prompt = (
+        "Jesteś profesjonalnym analitykiem Giełdy Papierów Wartościowych w Warszawie. "
+        "Oceń ogólny sentyment poniższych nagłówków wiadomości. "
+        "Zwróć TYLKO I WYŁĄCZNIE jedną liczbę z przedziału od -1.0 (bardzo negatywny) do 1.0 (bardzo pozytywny). "
+        "Zero oznacza neutralny. Nie pisz żadnych słów, tylko samą liczbę.\n\n"
+        f"Wiadomości:\n{tekst_newsow}\n\nOcena:"
+    )
+    
+    payload = {
+        "inputs": prompt,
+        "parameters": {
+            "max_new_tokens": 10,
+            "temperature": 0.01,
+            "return_full_text": False
+        }
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=20)
+        if response.status_code == 200:
+            wynik = response.json()
+            wygenerowany_tekst = wynik[0].get("generated_text", "").strip()
+            
+            # Ekstrakcja samej liczby z odpowiedzi (nawet jeśli model dopisze słowa)
+            dopasowanie = re.search(r"-?\d+\.\d+|-?\d+", wygenerowany_tekst)
+            if dopasowanie:
+                score = float(dopasowanie.group())
+                score = max(-1.0, min(1.0, score)) # Utrzymanie w limitach -1 do 1
+                return score, "Bielik 🦅"
+            else:
+                return 0.0, "Bielik 🦅 (Zły format)"
+        elif response.status_code == 503:
+            return 0.0, "Bielik 🦅 (Wybudzanie ⏳)"
+        else:
+            return 0.0, f"Bielik (Błąd {response.status_code})"
+    except Exception as e:
+        return 0.0, "Bielik (Błąd API)"
+
+# Mapa aktywów
 aktywa_do_handlu = {
     "Apple": {"t212": "AAPL_US_EQ", "yf": "AAPL", "search": "Apple stock market news"},
     "Microsoft": {"t212": "MSFT_US_EQ", "yf": "MSFT", "search": "Microsoft stock news"},
@@ -111,9 +161,8 @@ def pobierz_stan_konta():
         if response.status_code == 200:
             data = response.json()
             return data.get("free", 0.0), data.get("total", 0.0)
-    except Exception as e:
-        print(f"Błąd konta: {e}")
-    return 0.0, 0.0
+    except:
+        return 0.0, 0.0
 
 def pobierz_otwarte_pozycje_szczegoly():
     url = f"{T212_BASE_URL}/positions"
@@ -121,9 +170,8 @@ def pobierz_otwarte_pozycje_szczegoly():
         response = requests.get(url, auth=(T212_API_KEY, T212_API_SECRET))
         if response.status_code == 200:
             return response.json()
-    except Exception as e:
-        print(f"Błąd pobierania pozycji: {e}")
-    return []
+    except:
+        return []
 
 def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
     url = f"{T212_BASE_URL}/orders/market"
@@ -138,36 +186,25 @@ def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
 
 def analizuj_szeroki_rynek():
     df = yf.download("SPY", period="3mo", interval="1d", progress=False)
-    if df is None or df.empty:
-        return True, 0.0, 0.0
-        
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
-
+    if df is None or df.empty: return True, 0.0, 0.0
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     df['SMA50'] = df['Close'].rolling(window=50).mean()
     ostatnia_cena = float(df['Close'].iloc[-1])
     sma50 = float(df['SMA50'].iloc[-1])
-    
-    rynek_rosnie = ostatnia_cena > sma50
-    return rynek_rosnie, ostatnia_cena, sma50
+    return ostatnia_cena > sma50, ostatnia_cena, sma50
 
 def analizuj_aktywo(nazwa, symbol_yf, query):
     df_wk = yf.download(symbol_yf, period="2y", interval="1wk", progress=False)
     trend_tygodniowy_rosnacy = True 
-    
     if df_wk is not None and not df_wk.empty:
-        if isinstance(df_wk.columns, pd.MultiIndex):
-            df_wk.columns = df_wk.columns.get_level_values(0)
+        if isinstance(df_wk.columns, pd.MultiIndex): df_wk.columns = df_wk.columns.get_level_values(0)
         df_wk['SMA50'] = df_wk['Close'].rolling(window=50).mean()
         if not pd.isna(df_wk['SMA50'].iloc[-1]):
             trend_tygodniowy_rosnacy = float(df_wk['Close'].iloc[-1]) > float(df_wk['SMA50'].iloc[-1])
 
     df = yf.download(symbol_yf, period="3mo", interval="1d", progress=False)
-    if df is None or df.empty:
-        return False, 0.0, 0.0, "", ""
-        
-    if isinstance(df.columns, pd.MultiIndex):
-        df.columns = df.columns.get_level_values(0)
+    if df is None or df.empty: return False, 0.0, 0.0, "", ""
+    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
 
     df['SMA50'] = df['Close'].rolling(window=50).mean()
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
@@ -199,23 +236,19 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
 
     clean_q = query.replace(" ", "+")
     
-    # --- Z POPRAWKĄ NR 2: INTELIGENTNY WYBÓR REGIONU NEWSÓW ---
+    # --- HYBRYDOWY MÓZG (ROUTING AI) ---
     if symbol_yf.endswith(".WA") or "VWCE" in symbol_yf:
         rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=pl&gl=PL&ceid=PL:pl"
+        feed = feedparser.parse(rss_url)
+        tytuly_newsow = [entry.title for entry in feed.entries[:5]] if feed.entries else []
+        avg_sent, silnik = analizuj_sentyment_bielik(tytuly_newsow, HF_TOKEN)
     else:
         rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=en-US&gl=US&ceid=US:en"
-        
-    feed = feedparser.parse(rss_url)
-    
-    tytuly_newsow = []
-    if feed.entries:
-        for entry in feed.entries[:5]:
-            tytuly_newsow.append(entry.title)
-            
-    sentymenty_wartosci, silnik = analizuj_sentyment_finbert(tytuly_newsow, HF_TOKEN)
-    
-    sentymenty = [float(val) for val in sentymenty_wartosci]
-    avg_sent = sum(sentymenty) / len(sentymenty) if sentymenty else 0.0
+        feed = feedparser.parse(rss_url)
+        tytuly_newsow = [entry.title for entry in feed.entries[:5]] if feed.entries else []
+        sentymenty_wartosci, silnik = analizuj_sentyment_finbert(tytuly_newsow, HF_TOKEN)
+        sentymenty = [float(val) for val in sentymenty_wartosci]
+        avg_sent = sum(sentymenty) / len(sentymenty) if sentymenty else 0.0
 
     punkty_bycze = 0
     if ostatnia_cena > sma50: punkty_bycze += 1
@@ -230,12 +263,8 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     print(f"[{nazwa}] Trend: 1D {trend_1d_status} | 1W {trend_1w_status} | Vol: {vol_status} | RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedz.'} | Sentyment: {avg_sent:.2f} ({silnik})")
     
     if punkty_bycze >= 3:
-        if not trend_tygodniowy_rosnacy:
-            return False, ostatnia_cena, float(atr), silnik, ""
-        
-        if ostatni_wolumen < wolumen_sma * 0.9: 
-            return False, ostatnia_cena, float(atr), silnik, ""
-            
+        if not trend_tygodniowy_rosnacy: return False, ostatnia_cena, float(atr), silnik, ""
+        if ostatni_wolumen < wolumen_sma * 0.9: return False, ostatnia_cena, float(atr), silnik, ""
         uzasadnienie = f"RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedźwiedzi'} | Sentyment NLP: {avg_sent:.2f}"
         return True, ostatnia_cena, float(atr), silnik, uzasadnienie
             
@@ -283,8 +312,7 @@ def uruchom_automatyzacje():
                 if yf_sym:
                     df_ts = yf.download(yf_sym, period="1mo", interval="1d", progress=False)
                     if df_ts is not None and not df_ts.empty:
-                        if isinstance(df_ts.columns, pd.MultiIndex):
-                            df_ts.columns = df_ts.columns.get_level_values(0)
+                        if isinstance(df_ts.columns, pd.MultiIndex): df_ts.columns = df_ts.columns.get_level_values(0)
                         df_ts['SMA20'] = df_ts['Close'].rolling(window=20).mean()
                         cena_ts = float(df_ts['Close'].iloc[-1])
                         sma20_ts = float(df_ts['SMA20'].iloc[-1])
@@ -296,14 +324,12 @@ def uruchom_automatyzacje():
     for nazwa, info in aktywa_do_handlu.items():
         print(f"\nSkupiam się na: {nazwa}...")
         
-        if info["t212"] in posiadane_tickery:
-            continue
+        if info["t212"] in posiadane_tickery: continue
             
         sygnal, cena_usd, atr_usd, uzyty_silnik, uzasadnienie = analizuj_aktywo(nazwa, info["yf"], info["search"])
         
         if sygnal:
-            if not rynek_rosnie:
-                continue
+            if not rynek_rosnie: continue
             
             ryzyko_max_pln = total_capital * 0.015
             ryzyko_max_usd = ryzyko_max_pln / kurs_usd_pln
@@ -315,15 +341,11 @@ def uruchom_automatyzacje():
             liczba_z_kapitalu = int(max_kapital_na_pozycje_usd / cena_usd) if cena_usd > 0 else 0
             
             wolumen = min(liczba_z_ryzyka, liczba_z_kapitalu)
-            
-            if wolumen < 1:
-                continue
+            if wolumen < 1: continue
             
             szacowany_koszt_usd = wolumen * cena_usd
             szacowany_koszt_pln = szacowany_koszt_usd * kurs_usd_pln
-            
-            if szacowany_koszt_pln > free_cash:
-                continue
+            if szacowany_koszt_pln > free_cash: continue
             
             poziom_sl = cena_usd - roznica_sl_usd
             poziom_tp = cena_usd + (roznica_sl_usd * 2.0)
@@ -343,17 +365,13 @@ def uruchom_automatyzacje():
     print("\n📩 Generowanie i wysyłanie raportu na Telegram...")
     
     wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV)* 📊\n\n"
-    
-    if not rynek_rosnie:
-         wiadomosc_koncowa += "⚠️ *Filtr S&P 500:* Rynek znajduje się w trendzie spadkowym. Szukanie nowych pozycji długich (LONG) zostało na dziś zablokowane.\n\n"
+    if not rynek_rosnie: wiadomosc_koncowa += "⚠️ *Filtr S&P 500:* Rynek znajduje się w trendzie spadkowym. Szukanie nowych pozycji długich (LONG) zostało na dziś zablokowane.\n\n"
          
     if raport_trailing_stop == "" and raport_otwarte_pozycje == "":
         wiadomosc_koncowa += "💤 *Brak nowych akcji na dziś.*\nSystem nie znalazł bezpiecznych okazji spełniających restrykcyjne kryteria i nie wykrył zagrożeń dla otwartych pozycji."
     else:
-        if raport_trailing_stop:
-            wiadomosc_koncowa += "🛡️ *ALERTY TRAILING STOP (Ochrona Zysku)*\n" + raport_trailing_stop + "\n"
-        if raport_otwarte_pozycje:
-            wiadomosc_koncowa += "🚀 *NOWE POZYCJE (KONTO DEMO)*\n" + raport_otwarte_pozycje
+        if raport_trailing_stop: wiadomosc_koncowa += "🛡️ *ALERTY TRAILING STOP (Ochrona Zysku)*\n" + raport_trailing_stop + "\n"
+        if raport_otwarte_pozycje: wiadomosc_koncowa += "🚀 *NOWE POZYCJE (KONTO DEMO)*\n" + raport_otwarte_pozycje
             
     wyslij_telegram(wiadomosc_koncowa)
     print("✅ Zakończono działanie skryptu i wysłano raport!")
