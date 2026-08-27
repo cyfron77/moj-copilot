@@ -36,7 +36,7 @@ def wyslij_telegram(wiadomosc):
         print(f"Błąd wysyłania Telegrama: {e}")
         return False
 
-# --- BRAMKA FINBERT DLA BOTA ---
+# --- BRAMKA FINBERT DLA BOTA (Z POPRAWKĄ NR 1) ---
 def analizuj_sentyment_finbert(tytuly, token):
     if not tytuly:
         return [], "Brak newsów 📭"
@@ -68,9 +68,7 @@ def analizuj_sentyment_finbert(tytuly, token):
         return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Błąd połączenia)"
 
 # Mapa aktywów: Ticker dla API brokera -> Ticker dla Yahoo Finance
-# Mapa aktywów: Ticker dla API brokera -> Ticker dla Yahoo Finance
 aktywa_do_handlu = {
-    # --- USA: TOPOWE SPÓŁKI TECHNOLOGICZNE I FINANSOWE ---
     "Apple": {"t212": "AAPL_US_EQ", "yf": "AAPL", "search": "Apple stock market news"},
     "Microsoft": {"t212": "MSFT_US_EQ", "yf": "MSFT", "search": "Microsoft stock news"},
     "NVIDIA": {"t212": "NVDA_US_EQ", "yf": "NVDA", "search": "NVIDIA stock news"},
@@ -83,7 +81,6 @@ aktywa_do_handlu = {
     "Visa": {"t212": "V_US_EQ", "yf": "V", "search": "Visa stock market news"},
     "Walmart": {"t212": "WMT_US_EQ", "yf": "WMT", "search": "Walmart stock news"},
 
-    # --- GPW: TOPOWE SPÓŁKI (WIG20) ---
     "PKO BP": {"t212": "PKO_PL_EQ", "yf": "PKO.WA", "search": "PKO BP bank gielda GPW"},
     "Orlen": {"t212": "ORL_PL_EQ", "yf": "ORL.WA", "search": "Orlen gielda GPW"},
     "CD Projekt": {"t212": "CDR_PL_EQ", "yf": "CDR.WA", "search": "CD Projekt gielda akcje"},
@@ -95,7 +92,6 @@ aktywa_do_handlu = {
     "Bank Pekao": {"t212": "PEO_PL_EQ", "yf": "PEO.WA", "search": "Bank Pekao gielda GPW"},
     "mBank": {"t212": "MBK_PL_EQ", "yf": "MBK.WA", "search": "mBank gielda GPW"},
 
-    # --- TOP 10 ETF / ETN NA ŚWIECIE ---
     "S&P 500 ETF (SPY)": {"t212": "SPY_US_EQ", "yf": "SPY", "search": "S&P 500 ETF news"},
     "Nasdaq 100 ETF (QQQ)": {"t212": "QQQ_US_EQ", "yf": "QQQ", "search": "Nasdaq 100 ETF news"},
     "Vanguard Total World (VT)": {"t212": "VT_US_EQ", "yf": "VT", "search": "Vanguard Total World Stock ETF"},
@@ -107,6 +103,7 @@ aktywa_do_handlu = {
     "Real Estate REITs (VNQ)": {"t212": "VNQ_US_EQ", "yf": "VNQ", "search": "Vanguard Real Estate ETF"},
     "ARK Innovation (ARKK)": {"t212": "ARKK_US_EQ", "yf": "ARKK", "search": "ARK Innovation ETF news"}
 }
+
 def pobierz_stan_konta():
     url = f"{T212_BASE_URL}/account/cash"
     try:
@@ -154,7 +151,6 @@ def analizuj_szeroki_rynek():
     rynek_rosnie = ostatnia_cena > sma50
     return rynek_rosnie, ostatnia_cena, sma50
 
-# Zmiana: Funkcja zwraca teraz również "uzasadnienie" (tekst)
 def analizuj_aktywo(nazwa, symbol_yf, query):
     df_wk = yf.download(symbol_yf, period="2y", interval="1wk", progress=False)
     trend_tygodniowy_rosnacy = True 
@@ -202,7 +198,13 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     macd_sig = float(macd_signal.iloc[-1])
 
     clean_q = query.replace(" ", "+")
-    rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=en-US&gl=US&ceid=US:en"
+    
+    # --- Z POPRAWKĄ NR 2: INTELIGENTNY WYBÓR REGIONU NEWSÓW ---
+    if symbol_yf.endswith(".WA") or "VWCE" in symbol_yf:
+        rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=pl&gl=PL&ceid=PL:pl"
+    else:
+        rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=en-US&gl=US&ceid=US:en"
+        
     feed = feedparser.parse(rss_url)
     
     tytuly_newsow = []
@@ -234,7 +236,6 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
         if ostatni_wolumen < wolumen_sma * 0.9: 
             return False, ostatnia_cena, float(atr), silnik, ""
             
-        # Generowanie krótkiego uzasadnienia do raportu
         uzasadnienie = f"RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedźwiedzi'} | Sentyment NLP: {avg_sent:.2f}"
         return True, ostatnia_cena, float(atr), silnik, uzasadnienie
             
@@ -243,7 +244,6 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
 def uruchom_automatyzacje():
     print("🛡️ Uruchamiam bota (Pełna agregacja raportu DEV)...")
     
-    # --- ZMIENNE AGREGUJĄCE DANE DO JEDNEGO RAPORTU ---
     raport_otwarte_pozycje = ""
     raport_trailing_stop = ""
     
@@ -291,7 +291,6 @@ def uruchom_automatyzacje():
                         
                         if cena_ts < sma20_ts:
                             print(f"🚨 [TRAILING STOP] {nazwa_spolki}: Cena spadła poniżej SMA20!")
-                            # Dodajemy alert do agregatora
                             raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20. Obecny zysk: `+{zysk_pln:.2f} PLN`. Zalecane ręczne zabezpieczenie zysku!\n"
 
     for nazwa, info in aktywa_do_handlu.items():
@@ -335,14 +334,12 @@ def uruchom_automatyzacje():
                 print(f"🚀 SUKCES: {nazwa} - Wysłano zlecenie!")
                 notatka_blokady = " (⚠️ Zmniejszono do 10% kapitału)" if (wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka) else ""
                 
-                # Dodajemy info o nowej pozycji do agregatora
                 raport_otwarte_pozycje += (
                     f"✅ *{nazwa}* — `{wolumen}` szt. {notatka_blokady}\n"
                     f"   🔸 *Zabezpieczenia:* SL `{poziom_sl:.2f}$` | TP `{poziom_tp:.2f}$`\n"
                     f"   💡 *Uzasadnienie:* Silny trend 1D/1W, wysoki wolumen. {uzasadnienie}\n\n"
                 )
 
-    # --- WYSYŁKA ZBIORCZEGO RAPORTU DZIENNEGO ---
     print("\n📩 Generowanie i wysyłanie raportu na Telegram...")
     
     wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV)* 📊\n\n"
