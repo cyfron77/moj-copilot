@@ -102,7 +102,6 @@ def analizuj_sentyment_pl(tytuly, token):
                     label = najlepszy.get('label', '')
                     score = najlepszy.get('score', 0.0)
                     
-                    # XLM-RoBERTa zwraca: LABEL_2 (Pozytywny), LABEL_1 (Neutralny), LABEL_0 (Negatywny)
                     if label in ['LABEL_2', 'positive', 'POS']:
                         scores.append(score)
                     elif label in ['LABEL_0', 'negative', 'NEG']:
@@ -194,9 +193,18 @@ def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
     response = requests.post(url, json=payload, auth=(T212_API_KEY, T212_API_SECRET))
     return response.status_code == 200, response.json()
 
+# NOWA FUNKCJA (Krok 2): Automatyczne zamykanie pozycji przy Trailing Stopie
+def zamknij_pozycje_demo(ticker):
+    url = f"{T212_BASE_URL}/positions/{ticker}"
+    try:
+        response = requests.delete(url, auth=(T212_API_KEY, T212_API_SECRET))
+        return response.status_code in [200, 204], response.json() if response.content else {}
+    except Exception as e:
+        print(f"Błąd podczas zamykania pozycji {ticker}: {e}")
+        return False, {}
+
 def analizuj_szeroki_rynek():
     df = yf.download("SPY", period="3mo", interval="1d", progress=False)
-    # Zabezpieczenie (Fail-safe): Zwraca False jeśli nie udało się pobrać danych
     if df is None or df.empty: 
         print("⚠️ Krytyczny błąd: Nie udało się pobrać danych dla SPY! Blokuję nowe wejścia (Fail-safe).")
         return False, 0.0, 0.0
@@ -250,7 +258,6 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
 
     clean_q = query.replace(" ", "+")
     
-    # Skrócone okno wiadomości (z 7d na 3d) dla szybszej reakcji
     if symbol_yf.endswith(".WA") or "VWCE" in symbol_yf:
         rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:3d&hl=pl&gl=PL&ceid=PL:pl"
         feed = feedparser.parse(rss_url)
@@ -285,10 +292,14 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     return False, ostatnia_cena, float(atr), silnik, ""
 
 def uruchom_automatyzacje():
-    print("🛡️ Uruchamiam bota (Pełna agregacja raportu DEV)...")
+    print("🛡️ Uruchamiam bota (Pełna agregacja raportu DEV - Krok 2)...")
     
     raport_otwarte_pozycje = ""
     raport_trailing_stop = ""
+    
+    # Krok 2: Limit dzienny nowych wejść (Circuit Breaker)
+    MAX_NOWE_WEJSCIA_DZIS = 3
+    otworzone_dzis_licznik = 0
     
     free_cash, total_capital = pobierz_stan_konta()
     print(f"💰 Wolne środki: {free_cash:.2f} PLN | Całkowity kapitał: {total_capital:.2f} PLN")
@@ -332,12 +343,20 @@ def uruchom_automatyzacje():
                         sma20_ts = float(df_ts['SMA20'].iloc[-1])
                         
                         if cena_ts < sma20_ts:
-                            print(f"🚨 [TRAILING STOP] {nazwa_spolki}: Cena spadła poniżej SMA20!")
-                            raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20. Obecny zysk: `+{zysk_pln:.2f} PLN`. Zalecane ręczne zabezpieczenie zysku!\n"
+                            print(f"🚨 [TRAILING STOP] {nazwa_spolki}: Cena spadła poniżej SMA20! Zamykam pozycję automatycznie.")
+                            sukces_zamkniecia, _ = zamknij_pozycje_demo(tckr)
+                            
+                            if sukces_zamkniecia:
+                                raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20. Pozycja została *automatycznie zamknięta*. Zrealizowany zysk: `+{zysk_pln:.2f} PLN`.\n"
+                            else:
+                                raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20 (Zysk: `+{zysk_pln:.2f} PLN`), ale próba automatycznego zamknięcia nie powiodła się.\n"
 
     for nazwa, info in aktywa_do_handlu.items():
+        if otworzone_dzis_licznik >= MAX_NOWE_WEJSCIA_DZIS:
+            print(f"🛑 Osiągnięto dzienny limit nowych wejść ({MAX_NOWE_WEJSCIA_DZIS}). Przerywam dalsze wyszukiwanie.")
+            break
+
         print(f"\nSkupiam się na: {nazwa}...")
-        
         time.sleep(2.5) 
         
         if info["t212"] in posiadane_tickery: continue
@@ -352,7 +371,6 @@ def uruchom_automatyzacje():
             roznica_sl_usd = atr_usd * 2.0
             liczba_z_ryzyka = int(ryzyko_max_usd / roznica_sl_usd) if roznica_sl_usd > 0 else 0
             
-            # Zmiana z 10% na 5% maksymalnego kapitału na pozycję
             max_kapital_na_pozycje_pln = total_capital * 0.05
             max_kapital_na_pozycje_usd = max_kapital_na_pozycje_pln / kurs_usd_pln
             liczba_z_kapitalu = int(max_kapital_na_pozycje_usd / cena_usd) if cena_usd > 0 else 0
@@ -370,9 +388,10 @@ def uruchom_automatyzacje():
             sukces, wynik = otwórz_pozycje_demo(info["t212"], wolumen, poziom_sl, poziom_tp)
             
             if sukces:
-                # Zabezpieczenie kapitału przed otwieraniem zbyt wielu pozycji bez weryfikacji środków
                 free_cash -= szacowany_koszt_pln
-                print(f"🚀 SUKCES: {nazwa} - Wysłano zlecenie! Zaktualizowano dostępne środki: {free_cash:.2f} PLN")
+                otworzone_dzis_licznik += 1
+                print(f"🚀 SUKCES: {nazwa} - Wysłano zlecenie! Zaktualizowano dostępne środki: {free_cash:.2f} PLN (Licznik dzisiejszych wejść: {otworzone_dzis_licznik}/{MAX_NOWE_WEJSCIA_DZIS})")
+                
                 notatka_blokady = " (⚠️ Zmniejszono do 5% kapitału)" if (wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka) else ""
                 
                 raport_otwarte_pozycje += (
@@ -383,13 +402,13 @@ def uruchom_automatyzacje():
 
     print("\n📩 Generowanie i wysyłanie raportu na Telegram...")
     
-    wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV)* 📊\n\n"
+    wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV - KROK 2)* 📊\n\n"
     if not rynek_rosnie: wiadomosc_koncowa += "⚠️ *Filtr S&P 500:* Rynek znajduje się w trendzie spadkowym. Szukanie nowych pozycji długich (LONG) zostało na dziś zablokowane.\n\n"
          
     if raport_trailing_stop == "" and raport_otwarte_pozycje == "":
         wiadomosc_koncowa += "💤 *Brak nowych akcji na dziś.*\nSystem nie znalazł bezpiecznych okazji spełniających restrykcyjne kryteria i nie wykrył zagrożeń dla otwartych pozycji."
     else:
-        if raport_trailing_stop: wiadomosc_koncowa += "🛡️ *ALERTY TRAILING STOP (Ochrona Zysku)*\n" + raport_trailing_stop + "\n"
+        if raport_trailing_stop: wiadomosc_koncowa += "🛡️ *AUTOMATYCZNY TRAILING STOP (Ochrona Zysku)*\n" + raport_trailing_stop + "\n"
         if raport_otwarte_pozycje: wiadomosc_koncowa += "🚀 *NOWE POZYCJE (KONTO DEMO)*\n" + raport_otwarte_pozycje
             
     wyslij_telegram(wiadomosc_koncowa)
