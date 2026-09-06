@@ -87,11 +87,6 @@ def pobierz_statystyki_bazy():
         return 0, 0.0
 
 def pobierz_pnl_okresowy(typ="day"):
-    """
-    Zwraca PnL okresowy na podstawie daty entry_date:
-    typ='day'  -> bieżący dzień
-    typ='month' -> bieżący miesiąc (YYYY-MM)
-    """
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -119,10 +114,6 @@ def pobierz_pnl_okresowy(typ="day"):
         return 0.0
 
 def pobierz_metryki_ryzyka():
-    """
-    Liczy win-rate oraz prosty Sharpe na podstawie transakcji zamkniętych.
-    Sharpe (tu uproszczony) = średni PnL / odchylenie standardowe PnL.[web:58]
-    """
     try:
         conn = sqlite3.connect(DB_NAME)
         cursor = conn.cursor()
@@ -151,15 +142,6 @@ def pobierz_metryki_ryzyka():
         return 0.0, 0.0
 
 def sprawdz_circuit_breaker(total_capital, prog_dzien=-0.02, prog_mies=-0.05):
-    """
-    Circuit breaker na podstawie dziennego i miesięcznego PnL.
-    prog_dzien, prog_mies – progi drawdown (np. -0.02 = -2% kapitału).[web:58]
-    Zwraca:
-      allow_new (bool),
-      pnl_dzien, pnl_mies,
-      dd_dzien, dd_mies,
-      opis_powodu (str)
-    """
     pnl_dzien = pobierz_pnl_okresowy("day")
     pnl_mies = pobierz_pnl_okresowy("month")
 
@@ -290,42 +272,44 @@ def analizuj_sentyment_pl(tytuly, token):
             
     return 0.0, "XLM-RoBERTa (Limit prób)"
 
-# Mapa aktywów
+# --- MAPA AKTYWÓW Z SEKTORAMI ---
 aktywa_do_handlu = {
-    "Apple": {"t212": "AAPL_US_EQ", "yf": "AAPL", "search": "Apple stock market news"},
-    "Microsoft": {"t212": "MSFT_US_EQ", "yf": "MSFT", "search": "Microsoft stock news"},
-    "NVIDIA": {"t212": "NVDA_US_EQ", "yf": "NVDA", "search": "NVIDIA stock news"},
-    "Alphabet (Google)": {"t212": "GOOGL_US_EQ", "yf": "GOOGL", "search": "Google stock market news"},
-    "Amazon": {"t212": "AMZN_US_EQ", "yf": "AMZN", "search": "Amazon stock market news"},
-    "Meta (Facebook)": {"t212": "META_US_EQ", "yf": "META", "search": "Meta Facebook stock news"},
-    "Tesla": {"t212": "TSLA_US_EQ", "yf": "TSLA", "search": "Tesla stock market news"},
-    "Broadcom": {"t212": "AVGO_US_EQ", "yf": "AVGO", "search": "Broadcom stock news"},
-    "JPMorgan": {"t212": "JPM_US_EQ", "yf": "JPM", "search": "JPMorgan stock market news"},
-    "Visa": {"t212": "V_US_EQ", "yf": "V", "search": "Visa stock market news"},
-    "Walmart": {"t212": "WMT_US_EQ", "yf": "WMT", "search": "Walmart stock news"},
+    "Apple":        {"t212": "AAPL_US_EQ", "yf": "AAPL",    "search": "Apple stock market news",          "sektor": "TECH_US"},
+    "Microsoft":    {"t212": "MSFT_US_EQ", "yf": "MSFT",    "search": "Microsoft stock news",             "sektor": "TECH_US"},
+    "NVIDIA":       {"t212": "NVDA_US_EQ", "yf": "NVDA",    "search": "NVIDIA stock news",                "sektor": "TECH_US"},
+    "Alphabet (Google)": {"t212": "GOOGL_US_EQ", "yf": "GOOGL", "search": "Google stock market news",     "sektor": "TECH_US"},
+    "Amazon":       {"t212": "AMZN_US_EQ", "yf": "AMZN",    "search": "Amazon stock market news",         "sektor": "CONSUMER_US"},
+    "Meta (Facebook)": {"t212": "META_US_EQ", "yf": "META", "search": "Meta Facebook stock news",         "sektor": "TECH_US"},
+    "Tesla":        {"t212": "TSLA_US_EQ", "yf": "TSLA",    "search": "Tesla stock market news",          "sektor": "AUTO_US"},
+    "Broadcom":     {"t212": "AVGO_US_EQ", "yf": "AVGO",    "search": "Broadcom stock news",              "sektor": "TECH_US"},
+    "JPMorgan":     {"t212": "JPM_US_EQ",  "yf": "JPM",     "search": "JPMorgan stock market news",       "sektor": "BANK_US"},
+    "Visa":         {"t212": "V_US_EQ",    "yf": "V",       "search": "Visa stock market news",           "sektor": "FIN_US"},
+    "Walmart":      {"t212": "WMT_US_EQ",  "yf": "WMT",     "search": "Walmart stock news",               "sektor": "CONSUMER_US"},
 
-    "PKO BP": {"t212": "PKO_PL_EQ", "yf": "PKO.WA", "search": "PKO BP bank gielda GPW"},
-    "Orlen": {"t212": "ORL_PL_EQ", "yf": "ORL.WA", "search": "Orlen gielda GPW"},
-    "CD Projekt": {"t212": "CDR_PL_EQ", "yf": "CDR.WA", "search": "CD Projekt gielda akcje"},
-    "PZU": {"t212": "PZU_PL_EQ", "yf": "PZU.WA", "search": "PZU gielda GPW"},
-    "Dino Polska": {"t212": "DNP_PL_EQ", "yf": "DNP.WA", "search": "Dino Polska gielda GPW"},
-    "KGHM": {"t212": "KGH_PL_EQ", "yf": "KGH.WA", "search": "KGHM miedz gielda GPW"},
-    "Allegro": {"t212": "ALE_PL_EQ", "yf": "ALE.WA", "search": "Allegro gielda GPW"},
-    "LPP": {"t212": "LPP_PL_EQ", "yf": "LPP.WA", "search": "LPP gielda GPW"},
-    "Bank Pekao": {"t212": "PEO_PL_EQ", "yf": "PEO.WA", "search": "Bank Pekao gielda GPW"},
-    "mBank": {"t212": "MBK_PL_EQ", "yf": "MBK.WA", "search": "mBank gielda GPW"},
+    "PKO BP":       {"t212": "PKO_PL_EQ",  "yf": "PKO.WA",  "search": "PKO BP bank gielda GPW",           "sektor": "BANK_PL"},
+    "Orlen":        {"t212": "ORL_PL_EQ",  "yf": "ORL.WA",  "search": "Orlen gielda GPW",                 "sektor": "ENERGY_PL"},
+    "CD Projekt":   {"t212": "CDR_PL_EQ",  "yf": "CDR.WA",  "search": "CD Projekt gielda akcje",          "sektor": "GAMING_PL"},
+    "PZU":          {"t212": "PZU_PL_EQ",  "yf": "PZU.WA",  "search": "PZU gielda GPW",                   "sektor": "FIN_PL"},
+    "Dino Polska":  {"t212": "DNP_PL_EQ",  "yf": "DNP.WA",  "search": "Dino Polska gielda GPW",           "sektor": "CONSUMER_PL"},
+    "KGHM":         {"t212": "KGH_PL_EQ",  "yf": "KGH.WA",  "search": "KGHM miedz gielda GPW",            "sektor": "METALS_PL"},
+    "Allegro":      {"t212": "ALE_PL_EQ",  "yf": "ALE.WA",  "search": "Allegro gielda GPW",               "sektor": "E_COMMERCE_PL"},
+    "LPP":          {"t212": "LPP_PL_EQ",  "yf": "LPP.WA",  "search": "LPP gielda GPW",                   "sektor": "CONSUMER_PL"},
+    "Bank Pekao":   {"t212": "PEO_PL_EQ",  "yf": "PEO.WA",  "search": "Bank Pekao gielda GPW",            "sektor": "BANK_PL"},
+    "mBank":        {"t212": "MBK_PL_EQ",  "yf": "MBK.WA",  "search": "mBank gielda GPW",                 "sektor": "BANK_PL"},
 
-    "S&P 500 ETF (SPY)": {"t212": "SPY_US_EQ", "yf": "SPY", "search": "S&P 500 ETF news"},
-    "Nasdaq 100 ETF (QQQ)": {"t212": "QQQ_US_EQ", "yf": "QQQ", "search": "Nasdaq 100 ETF news"},
-    "Vanguard Total World (VT)": {"t212": "VT_US_EQ", "yf": "VT", "search": "Vanguard Total World Stock ETF"},
-    "Vanguard All-World (VWCE)": {"t212": "VWCE_DE_EQ", "yf": "VWCE.DE", "search": "VWCE ETF market news"},
-    "Emerging Markets ETF (VWO)": {"t212": "VWO_US_EQ", "yf": "VWO", "search": "Emerging markets ETF news"},
-    "Dividend ETF (SCHD)": {"t212": "SCHD_US_EQ", "yf": "SCHD", "search": "Schwab Dividend ETF news"},
-    "Gold Trust ETF (GLD)": {"t212": "GLD_US_EQ", "yf": "GLD", "search": "SPDR Gold Trust ETF news"},
-    "20+ Year Treasury Bonds (TLT)": {"t212": "TLT_US_EQ", "yf": "TLT", "search": "iShares 20+ Year Treasury Bond ETF"},
-    "Real Estate REITs (VNQ)": {"t212": "VNQ_US_EQ", "yf": "VNQ", "search": "Vanguard Real Estate ETF"},
-    "ARK Innovation (ARKK)": {"t212": "ARKK_US_EQ", "yf": "ARKK", "search": "ARK Innovation ETF news"}
+    "S&P 500 ETF (SPY)": {"t212": "SPY_US_EQ",  "yf": "SPY",     "search": "S&P 500 ETF news",           "sektor": "ETF_US"},
+    "Nasdaq 100 ETF (QQQ)": {"t212": "QQQ_US_EQ", "yf": "QQQ",   "search": "Nasdaq 100 ETF news",        "sektor": "ETF_US"},
+    "Vanguard Total World (VT)": {"t212": "VT_US_EQ", "yf": "VT", "search": "Vanguard Total World Stock ETF", "sektor": "ETF_GLOBAL"},
+    "Vanguard All-World (VWCE)": {"t212": "VWCE_DE_EQ", "yf": "VWCE.DE", "search": "VWCE ETF market news", "sektor": "ETF_GLOBAL"},
+    "Emerging Markets ETF (VWO)": {"t212": "VWO_US_EQ", "yf": "VWO", "search": "Emerging markets ETF news", "sektor": "ETF_EM"},
+    "Dividend ETF (SCHD)": {"t212": "SCHD_US_EQ", "yf": "SCHD", "search": "Schwab Dividend ETF news",     "sektor": "ETF_US"},
+    "Gold Trust ETF (GLD)": {"t212": "GLD_US_EQ", "yf": "GLD", "search": "SPDR Gold Trust ETF news",      "sektor": "COMMODITY"},
+    "20+ Year Treasury Bonds (TLT)": {"t212": "TLT_US_EQ", "yf": "TLT", "search": "iShares 20+ Year Treasury Bond ETF", "sektor": "BONDS_US"},
+    "Real Estate REITs (VNQ)": {"t212": "VNQ_US_EQ", "yf": "VNQ", "search": "Vanguard Real Estate ETF",   "sektor": "REIT_US"},
+    "ARK Innovation (ARKK)": {"t212": "ARKK_US_EQ", "yf": "ARKK", "search": "ARK Innovation ETF news",    "sektor": "ETF_US"}
 }
+
+MAX_POZYCJI_NA_SEKTOR = 2
 
 def pobierz_stan_konta():
     url = f"{T212_BASE_URL}/account/cash"
@@ -346,10 +330,31 @@ def pobierz_otwarte_pozycje_szczegoly():
     except:
         return []
 
+def policz_pozycje_na_sektor(otwarte_szczegoly):
+    """
+    Zwraca słownik {sektor: liczba_otwartych_pozycji_w_sektorze}
+    na podstawie mapy aktywa_do_handlu.
+    """
+    licznik = {}
+    if not isinstance(otwarte_szczegoly, list):
+        return licznik
+
+    for p in otwarte_szczegoly:
+        tckr = p.get('ticker') or p.get('instrument', {}).get('ticker')
+        if not tckr:
+            continue
+        # znajdź sektor po tickerze T212
+        for nazwa, info in aktywa_do_handlu.items():
+            if info["t212"] == tckr:
+                sektor = info.get("sektor", "INNE")
+                licznik[sektor] = licznik.get(sektor, 0) + 1
+                break
+    return licznik
+
 def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
     url = f"{T212_BASE_URL}/orders/market"
     payload = {
-        "quantity": quantity,
+        "quantity": quantity, 
         "ticker": ticker,
         "stopLoss": round(sl_price, 2),
         "takeProfit": round(tp_price, 2)
@@ -365,6 +370,35 @@ def zamknij_pozycje_demo(ticker):
     except Exception as e:
         print(f"Błąd podczas zamykania pozycji {ticker}: {e}")
         return False, {}
+
+def pobierz_vix():
+    """
+    Pobiera ostatnią wartość indeksu VIX (^VIX) przez yfinance.[web:88][web:98]
+    """
+    try:
+        df_vix = yf.download("^VIX", period="5d", interval="1d", progress=False)
+        if df_vix is not None and not df_vix.empty:
+            if isinstance(df_vix.columns, pd.MultiIndex):
+                df_vix.columns = df_vix.columns.get_level_values(0)
+            return float(df_vix['Close'].iloc[-1])
+    except Exception as e:
+        print(f"Błąd pobierania VIX: {e}")
+    return None
+
+def skaluj_ryzyko_na_vix(vix_value, base_risk_pct=0.015):
+    """
+    Skaluje ryzyko na podstawie poziomu VIX:
+      - VIX < 18  -> pełne ryzyko (base_risk_pct)
+      - 18 <= VIX <= 25 -> połowa ryzyka
+      - VIX > 25  -> blokada nowych pozycji (zwraca 0)[web:93][web:99]
+    """
+    if vix_value is None:
+        return base_risk_pct, "Brak danych VIX – używam domyślnego ryzyka."
+    if vix_value < 18.0:
+        return base_risk_pct, f"Niski VIX ({vix_value:.2f}) – pełne ryzyko {base_risk_pct*100:.2f}%."
+    if vix_value <= 25.0:
+        return base_risk_pct * 0.5, f"Podwyższony VIX ({vix_value:.2f}) – ryzyko obcięte o połowę ({base_risk_pct*50:.2f}%)."
+    return 0.0, f"Wysoki VIX ({vix_value:.2f}) – blokuję nowe pozycje (tylko zarządzanie otwartymi)."
 
 def analizuj_szeroki_rynek():
     df = yf.download("SPY", period="3mo", interval="1d", progress=False)
@@ -465,9 +499,8 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     return False, ostatnia_cena, float(atr), silnik, ""
 
 def uruchom_automatyzacje():
-    print("🛡️ Uruchamiam bota (Pełna agregacja raportu DEV - Krok 3: SQLite + Circuit Breaker)...")
+    print("🛡️ Uruchamiam bota (DEV: SQLite + Circuit Breaker + Limity sektorowe + filtr VIX)...")
     
-    # Inicjalizacja lokalnej bazy danych
     inicjalizuj_baze()
     
     raport_otwarte_pozycje = ""
@@ -491,12 +524,21 @@ def uruchom_automatyzacje():
     except:
         kurs_usd_pln = 4.0
 
+    # --- FILTR VIX ---
+    vix_value = pobierz_vix()
+    base_risk_pct = 0.015
+    ryzyko_proc_vix, opis_vix = skaluj_ryzyko_na_vix(vix_value, base_risk_pct)
+    print(f"📊 Filtr VIX: {opis_vix}")
+    if ryzyko_proc_vix <= 0.0:
+        print("🛑 VIX bardzo wysoki – blokuję nowe pozycje (pozostawiam tylko trailing stop).")
+
     print("\n🌎 Analizuję stan szerokiego rynku (Indeks S&P 500)...")
     rynek_rosnie, spy_cena, spy_sma50 = analizuj_szeroki_rynek()
 
     print("\n🛡️ Analizuję otwarte pozycje w poszukiwaniu okazji do Trailing Stopa...")
     otwarte_szczegoly = pobierz_otwarte_pozycje_szczegoly()
     posiadane_tickery = []
+    pozycje_na_sektor = policz_pozycje_na_sektor(otwarte_szczegoly)
     
     if isinstance(otwarte_szczegoly, list):
         for p in otwarte_szczegoly:
@@ -524,7 +566,6 @@ def uruchom_automatyzacje():
                             sukces_zamkniecia, _ = zamknij_pozycje_demo(tckr)
                             
                             if sukces_zamkniecia:
-                                # Zapis do bazy danych SQLite
                                 zapisz_zamkniecie_w_bazie(tckr, cena_ts, zysk_pln)
                                 raport_trailing_stop += (
                                     f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20. "
@@ -540,13 +581,13 @@ def uruchom_automatyzacje():
     blokada_drawdown = False
     pnl_dzien = pnl_mies = dd_dzien = dd_mies = 0.0
 
-    allow_new, pnl_dzien, pnl_mies, dd_dzien, dd_mies, powod_blokady = sprawdz_circuit_breaker(
+    allow_new_cb, pnl_dzien, pnl_mies, dd_dzien, dd_mies, powod_blokady = sprawdz_circuit_breaker(
         total_capital,
-        prog_dzien=-0.02,  # -2% dzienny
-        prog_mies=-0.05    # -5% miesięczny
+        prog_dzien=-0.02,
+        prog_mies=-0.05
     )
 
-    if not allow_new:
+    if not allow_new_cb:
         blokada_drawdown = True
         print(f"🛑 Circuit breaker aktywny: {powod_blokady}")
         raport_otwarte_pozycje += (
@@ -557,8 +598,9 @@ def uruchom_automatyzacje():
         )
 
     for nazwa, info in aktywa_do_handlu.items():
-        if blokada_drawdown:
-            print("🛑 Circuit breaker aktywny – blokuję nowe pozycje na ten okres.")
+        # Blokada z circuit breakera lub wysokiego VIX
+        if blokada_drawdown or ryzyko_proc_vix <= 0.0:
+            print("🛑 Circuit breaker lub wysoki VIX aktywny – blokuję nowe pozycje na ten okres.")
             break
 
         if otworzone_dzis_licznik >= MAX_NOWE_WEJSCIA_DZIS:
@@ -567,6 +609,13 @@ def uruchom_automatyzacje():
 
         print(f"\nSkupiam się na: {nazwa}...")
         time.sleep(2.5)
+        
+        # Sprawdzenie limitu sektorowego
+        sektor = info.get("sektor", "INNE")
+        aktualne_w_sektorze = pozycje_na_sektor.get(sektor, 0)
+        if aktualne_w_sektorze >= MAX_POZYCJI_NA_SEKTOR:
+            print(f"⚠️ Limit sektorowy osiągnięty dla sektora {sektor} (>= {MAX_POZYCJI_NA_SEKTOR}). Pomijam {nazwa}.")
+            continue
         
         if info["t212"] in posiadane_tickery:
             continue
@@ -577,7 +626,8 @@ def uruchom_automatyzacje():
             if not rynek_rosnie:
                 continue
             
-            ryzyko_max_pln = total_capital * 0.015
+            # Ryzyko transakcji skorygowane o VIX
+            ryzyko_max_pln = total_capital * ryzyko_proc_vix
             ryzyko_max_usd = ryzyko_max_pln / kurs_usd_pln
             roznica_sl_usd = atr_usd * 2.0
             liczba_z_ryzyka = int(ryzyko_max_usd / roznica_sl_usd) if roznica_sl_usd > 0 else 0
@@ -601,30 +651,29 @@ def uruchom_automatyzacje():
             sukces, wynik = otwórz_pozycje_demo(info["t212"], wolumen, poziom_sl, poziom_tp)
             
             if sukces:
-                # Aktualizacja lokalnego free_cash po otwarciu pozycji
                 free_cash -= szacowany_koszt_pln
                 otworzone_dzis_licznik += 1
+
+                # Aktualizacja liczników sektorowych
+                pozycje_na_sektor[sektor] = pozycje_na_sektor.get(sektor, 0) + 1
                 
-                # Zapis otwarcia nowej pozycji w lokalnej bazie SQLite
                 zapisz_otwarcie_w_bazie(info["t212"], nazwa, wolumen, cena_usd, poziom_sl, poziom_tp)
                 
                 print(f"🚀 SUKCES: {nazwa} - Wysłano zlecenie! Zaktualizowano dostępne środki: {free_cash:.2f} PLN")
                 
-                notatka_blokady = " (⚠️ Zmniejszono do 5% kapitału)" if (wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka) else ""
-                
+                notatka_blokady = " (⚠️ Zmniejszono ryzyko przez VIX)" if ryzyko_proc_vix < base_risk_pct else ""
                 raport_otwarte_pozycje += (
-                    f"✅ *{nazwa}* — `{wolumen}` szt. {notatka_blokady}\n"
+                    f"✅ *{nazwa}* — `{wolumen}` szt. [Sektor: {sektor}]{notatka_blokady}\n"
                     f"   🔸 *Zabezpieczenia:* SL `{poziom_sl:.2f}$` | TP `{poziom_tp:.2f}$`\n"
                     f"   💡 *Uzasadnienie:* Silny trend 1D/1W, wysoki wolumen. {uzasadnienie}\n\n"
                 )
 
     print("\n📩 Generowanie i wysyłanie raportu na Telegram...")
     
-    # Pobranie statystyk z bazy danych do podsumowania
     zamkniete_razem, suma_pnl_razem = pobierz_statystyki_bazy()
     win_rate, sharpe = pobierz_metryki_ryzyka()
     
-    wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV - KROK 3 + Circuit Breaker)* 📊\n\n"
+    wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV: Circuit + Sektory + VIX)* 📊\n\n"
     if not rynek_rosnie:
         wiadomosc_koncowa += "⚠️ *Filtr S&P 500:* Rynek znajduje się w trendzie spadkowym. Nowe pozycje długie (LONG) zablokowane.\n\n"
          
@@ -639,19 +688,19 @@ def uruchom_automatyzacje():
         if raport_otwarte_pozycje:
             wiadomosc_koncowa += "🚀 *NOWE POZYCJE (KONTO DEMO)*\n" + raport_otwarte_pozycje
 
-    # Doklejenie statystyk z bazy danych SQLite + drawdown
     wiadomosc_koncowa += (
         f"📈 *STATYSTYKI BAZY DANYCH (SQLite)*\n"
         f"   • Zamknięte pozycje ogółem: `{zamkniete_razem}`\n"
         f"   • Łączny wynik PnL: `{suma_pnl_razem:+.2f} PLN`\n"
         f"   • Win-rate (zamknięte): `{win_rate:.1f}%`\n"
-        f"   • Sharpe (na podstawie transakcji): `{sharpe:.2f}`\n"
+        f"   • Sharpe (na transakcjach): `{sharpe:.2f}`\n"
         f"   • PnL dzienny: `{pnl_dzien:+.2f} PLN`\n"
         f"   • PnL miesięczny: `{pnl_mies:+.2f} PLN`\n"
+        f"   • VIX: `{vix_value if vix_value is not None else 'brak danych'}`\n"
     )
             
     wyslij_telegram(wiadomosc_koncowa)
-    print("✅ Zakończono działanie skryptu i wysłano raport ze statystykami SQLite oraz circuit breakerem!")
+    print("✅ Zakończono działanie skryptu i wysłano raport (circuit + sektory + VIX)!")
 
 if __name__ == "__main__":
     uruchom_automatyzacje()
