@@ -86,6 +86,103 @@ def pobierz_statystyki_bazy():
     except:
         return 0, 0.0
 
+def pobierz_pnl_okresowy(typ="day"):
+    """
+    Zwraca PnL okresowy na podstawie daty entry_date:
+    typ='day'  -> bieżący dzień
+    typ='month' -> bieżący miesiąc (YYYY-MM)
+    """
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        if typ == "day":
+            cursor.execute("""
+                SELECT SUM(pnl) FROM transakcje
+                WHERE status = 'CLOSED' 
+                  AND date(entry_date) = date('now')
+            """)
+        elif typ == "month":
+            cursor.execute("""
+                SELECT SUM(pnl) FROM transakcje
+                WHERE status = 'CLOSED'
+                  AND strftime('%Y-%m', entry_date) = strftime('%Y-%m', 'now')
+            """)
+        else:
+            conn.close()
+            return 0.0
+
+        row = cursor.fetchone()
+        conn.close()
+        return row[0] if row and row[0] else 0.0
+    except Exception as e:
+        print(f"Błąd pobierania PnL okresowego ({typ}): {e}")
+        return 0.0
+
+def pobierz_metryki_ryzyka():
+    """
+    Liczy win-rate oraz prosty Sharpe na podstawie transakcji zamkniętych.
+    Sharpe (tu uproszczony) = średni PnL / odchylenie standardowe PnL.[web:58]
+    """
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT pnl FROM transakcje
+            WHERE status = 'CLOSED'
+              AND pnl IS NOT NULL
+        """)
+        rows = cursor.fetchall()
+        conn.close()
+
+        if not rows:
+            return 0.0, 0.0
+
+        pnls = np.array([r[0] for r in rows], dtype=float)
+        liczba_transakcji = len(pnls)
+        liczba_wygranych = np.sum(pnls > 0.0)
+
+        win_rate = (liczba_wygranych / liczba_transakcji) * 100.0 if liczba_transakcji > 0 else 0.0
+        std_pnl = np.std(pnls) if liczba_transakcji > 1 else 0.0
+        sharpe = (np.mean(pnls) / std_pnl) if std_pnl > 0 else 0.0
+
+        return win_rate, sharpe
+    except Exception as e:
+        print(f"Błąd liczenia metryk ryzyka (win-rate/Sharpe): {e}")
+        return 0.0, 0.0
+
+def sprawdz_circuit_breaker(total_capital, prog_dzien=-0.02, prog_mies=-0.05):
+    """
+    Circuit breaker na podstawie dziennego i miesięcznego PnL.
+    prog_dzien, prog_mies – progi drawdown (np. -0.02 = -2% kapitału).[web:58]
+    Zwraca:
+      allow_new (bool),
+      pnl_dzien, pnl_mies,
+      dd_dzien, dd_mies,
+      opis_powodu (str)
+    """
+    pnl_dzien = pobierz_pnl_okresowy("day")
+    pnl_mies = pobierz_pnl_okresowy("month")
+
+    if total_capital <= 0:
+        return True, pnl_dzien, pnl_mies, 0.0, 0.0, ""
+
+    dd_dzien = pnl_dzien / total_capital
+    dd_mies = pnl_mies / total_capital
+
+    allow_new = True
+    powod = ""
+
+    if dd_dzien <= prog_dzien:
+        allow_new = False
+        powod += f"Dzienny drawdown {dd_dzien*100:.2f}% ≤ próg {prog_dzien*100:.2f}%."
+    if dd_mies <= prog_mies:
+        allow_new = False
+        if powod:
+            powod += " "
+        powod += f"Miesięczny drawdown {dd_mies*100:.2f}% ≤ próg {prog_mies*100:.2f}%."
+
+    return allow_new, pnl_dzien, pnl_mies, dd_dzien, dd_mies, powod
+
 def wyslij_telegram(wiadomosc):
     if not TG_TOKEN or not TG_CHAT_ID:
         print("⚠️ Brak skonfigurowanych kluczy Telegram dla DEV.")
@@ -252,7 +349,7 @@ def pobierz_otwarte_pozycje_szczegoly():
 def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
     url = f"{T212_BASE_URL}/orders/market"
     payload = {
-        "quantity": quantity, 
+        "quantity": quantity,
         "ticker": ticker,
         "stopLoss": round(sl_price, 2),
         "takeProfit": round(tp_price, 2)
@@ -275,7 +372,8 @@ def analizuj_szeroki_rynek():
         print("⚠️ Krytyczny błąd: Nie udało się pobrać danych dla SPY! Blokuję nowe wejścia (Fail-safe).")
         return False, 0.0, 0.0
     
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
     df['SMA50'] = df['Close'].rolling(window=50).mean()
     ostatnia_cena = float(df['Close'].iloc[-1])
     sma50 = float(df['SMA50'].iloc[-1])
@@ -285,14 +383,17 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     df_wk = yf.download(symbol_yf, period="2y", interval="1wk", progress=False)
     trend_tygodniowy_rosnacy = True 
     if df_wk is not None and not df_wk.empty:
-        if isinstance(df_wk.columns, pd.MultiIndex): df_wk.columns = df_wk.columns.get_level_values(0)
+        if isinstance(df_wk.columns, pd.MultiIndex):
+            df_wk.columns = df_wk.columns.get_level_values(0)
         df_wk['SMA50'] = df_wk['Close'].rolling(window=50).mean()
         if not pd.isna(df_wk['SMA50'].iloc[-1]):
             trend_tygodniowy_rosnacy = float(df_wk['Close'].iloc[-1]) > float(df_wk['SMA50'].iloc[-1])
 
     df = yf.download(symbol_yf, period="3mo", interval="1d", progress=False)
-    if df is None or df.empty: return False, 0.0, 0.0, "", ""
-    if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
+    if df is None or df.empty:
+        return False, 0.0, 0.0, "", ""
+    if isinstance(df.columns, pd.MultiIndex):
+        df.columns = df.columns.get_level_values(0)
 
     df['SMA50'] = df['Close'].rolling(window=50).mean()
     df['Vol_SMA20'] = df['Volume'].rolling(window=20).mean()
@@ -338,10 +439,14 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
         avg_sent = sum(sentymenty) / len(sentymenty) if sentymenty else 0.0
 
     punkty_bycze = 0
-    if ostatnia_cena > sma50: punkty_bycze += 1
-    if rsi < 35: punkty_bycze += 1
-    if macd_val > macd_sig: punkty_bycze += 1
-    if avg_sent > 0.05: punkty_bycze += 1
+    if ostatnia_cena > sma50:
+        punkty_bycze += 1
+    if rsi < 35:
+        punkty_bycze += 1
+    if macd_val > macd_sig:
+        punkty_bycze += 1
+    if avg_sent > 0.05:
+        punkty_bycze += 1
 
     trend_1w_status = 'UP' if trend_tygodniowy_rosnacy else 'DOWN'
     trend_1d_status = 'UP' if ostatnia_cena > sma50 else 'DOWN'
@@ -350,15 +455,17 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     print(f"[{nazwa}] Trend: 1D {trend_1d_status} | 1W {trend_1w_status} | Vol: {vol_status} | RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedz.'} | Sentyment: {avg_sent:.2f} ({silnik})")
     
     if punkty_bycze >= 3:
-        if not trend_tygodniowy_rosnacy: return False, ostatnia_cena, float(atr), silnik, ""
-        if ostatni_wolumen < wolumen_sma * 0.9: return False, ostatnia_cena, float(atr), silnik, ""
+        if not trend_tygodniowy_rosnacy:
+            return False, ostatnia_cena, float(atr), silnik, ""
+        if ostatni_wolumen < wolumen_sma * 0.9:
+            return False, ostatnia_cena, float(atr), silnik, ""
         uzasadnienie = f"RSI: {rsi:.1f} | MACD: {'Byczy' if macd_val>macd_sig else 'Niedźwiedzi'} | Sentyment NLP: {avg_sent:.2f}"
         return True, ostatnia_cena, float(atr), silnik, uzasadnienie
             
     return False, ostatnia_cena, float(atr), silnik, ""
 
 def uruchom_automatyzacje():
-    print("🛡️ Uruchamiam bota (Pełna agregacja raportu DEV - Krok 3: SQLite)...")
+    print("🛡️ Uruchamiam bota (Pełna agregacja raportu DEV - Krok 3: SQLite + Circuit Breaker)...")
     
     # Inicjalizacja lokalnej bazy danych
     inicjalizuj_baze()
@@ -394,7 +501,8 @@ def uruchom_automatyzacje():
     if isinstance(otwarte_szczegoly, list):
         for p in otwarte_szczegoly:
             tckr = p.get('ticker') or p.get('instrument', {}).get('ticker')
-            if not tckr: continue
+            if not tckr:
+                continue
             posiadane_tickery.append(tckr)
             
             zysk_pln = float(p.get('walletImpact', {}).get('unrealizedProfitLoss', 0.0))
@@ -405,7 +513,8 @@ def uruchom_automatyzacje():
                 if yf_sym:
                     df_ts = yf.download(yf_sym, period="1mo", interval="1d", progress=False)
                     if df_ts is not None and not df_ts.empty:
-                        if isinstance(df_ts.columns, pd.MultiIndex): df_ts.columns = df_ts.columns.get_level_values(0)
+                        if isinstance(df_ts.columns, pd.MultiIndex):
+                            df_ts.columns = df_ts.columns.get_level_values(0)
                         df_ts['SMA20'] = df_ts['Close'].rolling(window=20).mean()
                         cena_ts = float(df_ts['Close'].iloc[-1])
                         sma20_ts = float(df_ts['SMA20'].iloc[-1])
@@ -417,24 +526,56 @@ def uruchom_automatyzacje():
                             if sukces_zamkniecia:
                                 # Zapis do bazy danych SQLite
                                 zapisz_zamkniecie_w_bazie(tckr, cena_ts, zysk_pln)
-                                raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20. Pozycja zamknięta automatycznie. Zysk: `+{zysk_pln:.2f} PLN`.\n"
+                                raport_trailing_stop += (
+                                    f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20. "
+                                    f"Pozycja zamknięta automatycznie. Zysk: `+{zysk_pln:.2f} PLN`.\n"
+                                )
                             else:
-                                raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena spadła poniżej SMA20 (Zysk: `+{zysk_pln:.2f} PLN`), ale próba automatycznego zamknięcia nie powiodła się.\n"
+                                raport_trailing_stop += (
+                                    f"🚨 *{nazwa_spolki}*: Cena spadła poniżej SMA20 "
+                                    f"(Zysk: `+{zysk_pln:.2f} PLN`), ale próba automatycznego zamknięcia nie powiodła się.\n"
+                                )
+
+    # --- CIRCUIT BREAKER NA BAZIE SQLITE / DRAW DOWN ---
+    blokada_drawdown = False
+    pnl_dzien = pnl_mies = dd_dzien = dd_mies = 0.0
+
+    allow_new, pnl_dzien, pnl_mies, dd_dzien, dd_mies, powod_blokady = sprawdz_circuit_breaker(
+        total_capital,
+        prog_dzien=-0.02,  # -2% dzienny
+        prog_mies=-0.05    # -5% miesięczny
+    )
+
+    if not allow_new:
+        blokada_drawdown = True
+        print(f"🛑 Circuit breaker aktywny: {powod_blokady}")
+        raport_otwarte_pozycje += (
+            "🛑 *CIRCUIT BREAKER (DRAW DOWN)*\n"
+            f"   • PnL dzienny: `{pnl_dzien:+.2f} PLN` (DD: {dd_dzien*100:.2f}%)\n"
+            f"   • PnL miesięczny: `{pnl_mies:+.2f} PLN` (DD: {dd_mies*100:.2f}%)\n"
+            "   • Nowe pozycje długie zablokowane do końca okresu.\n\n"
+        )
 
     for nazwa, info in aktywa_do_handlu.items():
+        if blokada_drawdown:
+            print("🛑 Circuit breaker aktywny – blokuję nowe pozycje na ten okres.")
+            break
+
         if otworzone_dzis_licznik >= MAX_NOWE_WEJSCIA_DZIS:
             print(f"🛑 Osiągnięto dzienny limit nowych wejść ({MAX_NOWE_WEJSCIA_DZIS}). Przerywam dalsze wyszukiwanie.")
             break
 
         print(f"\nSkupiam się na: {nazwa}...")
-        time.sleep(2.5) 
+        time.sleep(2.5)
         
-        if info["t212"] in posiadane_tickery: continue
+        if info["t212"] in posiadane_tickery:
+            continue
             
         sygnal, cena_usd, atr_usd, uzyty_silnik, uzasadnienie = analizuj_aktywo(nazwa, info["yf"], info["search"])
         
         if sygnal:
-            if not rynek_rosnie: continue
+            if not rynek_rosnie:
+                continue
             
             ryzyko_max_pln = total_capital * 0.015
             ryzyko_max_usd = ryzyko_max_pln / kurs_usd_pln
@@ -446,11 +587,13 @@ def uruchom_automatyzacje():
             liczba_z_kapitalu = int(max_kapital_na_pozycje_usd / cena_usd) if cena_usd > 0 else 0
             
             wolumen = min(liczba_z_ryzyka, liczba_z_kapitalu)
-            if wolumen < 1: continue
+            if wolumen < 1:
+                continue
             
             szacowany_koszt_usd = wolumen * cena_usd
             szacowany_koszt_pln = szacowany_koszt_usd * kurs_usd_pln
-            if szacowany_koszt_pln > free_cash: continue
+            if szacowany_koszt_pln > free_cash:
+                continue
             
             poziom_sl = cena_usd - roznica_sl_usd
             poziom_tp = cena_usd + (roznica_sl_usd * 2.0)
@@ -458,6 +601,7 @@ def uruchom_automatyzacje():
             sukces, wynik = otwórz_pozycje_demo(info["t212"], wolumen, poziom_sl, poziom_tp)
             
             if sukces:
+                # Aktualizacja lokalnego free_cash po otwarciu pozycji
                 free_cash -= szacowany_koszt_pln
                 otworzone_dzis_licznik += 1
                 
@@ -478,25 +622,36 @@ def uruchom_automatyzacje():
     
     # Pobranie statystyk z bazy danych do podsumowania
     zamkniete_razem, suma_pnl_razem = pobierz_statystyki_bazy()
+    win_rate, sharpe = pobierz_metryki_ryzyka()
     
-    wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV - KROK 3)* 📊\n\n"
-    if not rynek_rosnie: wiadomosc_koncowa += "⚠️ *Filtr S&P 500:* Rynek znajduje się w trendzie spadkowym. Nowe pozycje długie (LONG) zablokowane.\n\n"
+    wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV - KROK 3 + Circuit Breaker)* 📊\n\n"
+    if not rynek_rosnie:
+        wiadomosc_koncowa += "⚠️ *Filtr S&P 500:* Rynek znajduje się w trendzie spadkowym. Nowe pozycje długie (LONG) zablokowane.\n\n"
          
     if raport_trailing_stop == "" and raport_otwarte_pozycje == "":
-        wiadomosc_koncowa += "💤 *Brak nowych akcji na dziś.*\nSystem nie znalazł okazji spełniających kryteria i nie wykrył zagrożeń dla otwartych pozycji.\n\n"
+        wiadomosc_koncowa += (
+            "💤 *Brak nowych akcji na dziś.*\n"
+            "System nie znalazł okazji spełniających kryteria i nie wykrył zagrożeń dla otwartych pozycji.\n\n"
+        )
     else:
-        if raport_trailing_stop: wiadomosc_koncowa += "🛡️ *AUTOMATYCZNY TRAILING STOP*\n" + raport_trailing_stop + "\n"
-        if raport_otwarte_pozycje: wiadomosc_koncowa += "🚀 *NOWE POZYCJE (KONTO DEMO)*\n" + raport_otwarte_pozycje
+        if raport_trailing_stop:
+            wiadomosc_koncowa += "🛡️ *AUTOMATYCZNY TRAILING STOP*\n" + raport_trailing_stop + "\n"
+        if raport_otwarte_pozycje:
+            wiadomosc_koncowa += "🚀 *NOWE POZYCJE (KONTO DEMO)*\n" + raport_otwarte_pozycje
 
-    # Doklejenie statystyk z bazy danych SQLite
+    # Doklejenie statystyk z bazy danych SQLite + drawdown
     wiadomosc_koncowa += (
         f"📈 *STATYSTYKI BAZY DANYCH (SQLite)*\n"
         f"   • Zamknięte pozycje ogółem: `{zamkniete_razem}`\n"
         f"   • Łączny wynik PnL: `{suma_pnl_razem:+.2f} PLN`\n"
+        f"   • Win-rate (zamknięte): `{win_rate:.1f}%`\n"
+        f"   • Sharpe (na podstawie transakcji): `{sharpe:.2f}`\n"
+        f"   • PnL dzienny: `{pnl_dzien:+.2f} PLN`\n"
+        f"   • PnL miesięczny: `{pnl_mies:+.2f} PLN`\n"
     )
             
     wyslij_telegram(wiadomosc_koncowa)
-    print("✅ Zakończono działanie skryptu i wysłano raport ze statystykami SQLite!")
+    print("✅ Zakończono działanie skryptu i wysłano raport ze statystykami SQLite oraz circuit breakerem!")
 
 if __name__ == "__main__":
     uruchom_automatyzacje()
