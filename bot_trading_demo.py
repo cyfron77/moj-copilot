@@ -1,5 +1,7 @@
 import os
 import time
+import sqlite3
+from datetime import datetime
 import requests
 import pandas as pd
 import numpy as np
@@ -18,6 +20,71 @@ TG_CHAT_ID = os.getenv("TG_CHAT_ID")
 
 # Konfiguracja Hugging Face (FinBERT & XLM-RoBERTa)
 HF_TOKEN = os.getenv("HF_API_TOKEN")
+
+# --- KROK 3: KONFIGURACJA BAZY DANYCH SQLITE ---
+DB_NAME = "trading_history.db"
+
+def inicjalizuj_baze():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS transakcje (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT,
+            nazwa TEXT,
+            quantity INTEGER,
+            entry_price REAL,
+            sl REAL,
+            tp REAL,
+            entry_date TEXT,
+            status TEXT,
+            exit_price REAL,
+            pnl REAL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def zapisz_otwarcie_w_bazie(ticker, nazwa, quantity, entry_price, sl, tp):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        data_teraz = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute('''
+            INSERT INTO transakcje (ticker, nazwa, quantity, entry_price, sl, tp, entry_date, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 'OPEN')
+        ''', (ticker, nazwa, quantity, entry_price, sl, tp, data_teraz))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Błąd zapisu otwarcia do bazy: {e}")
+
+def zapisz_zamkniecie_w_bazie(ticker, exit_price, pnl):
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute('''
+            UPDATE transakcje 
+            SET status = 'CLOSED', exit_price = ?, pnl = ?
+            WHERE ticker = ? AND status = 'OPEN'
+        ''', (exit_price, pnl, ticker))
+        conn.commit()
+        conn.close()
+    except Exception as e:
+        print(f"Błąd zapisu zamknięcia w bazie: {e}")
+
+def pobierz_statystyki_bazy():
+    try:
+        conn = sqlite3.connect(DB_NAME)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*), SUM(pnl) FROM transakcje WHERE status = 'CLOSED'")
+        row = cursor.fetchone()
+        conn.close()
+        zamkniete = row[0] if row and row[0] else 0
+        suma_pnl = row[1] if row and row[1] else 0.0
+        return zamkniete, suma_pnl
+    except:
+        return 0, 0.0
 
 def wyslij_telegram(wiadomosc):
     if not TG_TOKEN or not TG_CHAT_ID:
@@ -193,7 +260,6 @@ def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
     response = requests.post(url, json=payload, auth=(T212_API_KEY, T212_API_SECRET))
     return response.status_code == 200, response.json()
 
-# NOWA FUNKCJA (Krok 2): Automatyczne zamykanie pozycji przy Trailing Stopie
 def zamknij_pozycje_demo(ticker):
     url = f"{T212_BASE_URL}/positions/{ticker}"
     try:
@@ -292,12 +358,14 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
     return False, ostatnia_cena, float(atr), silnik, ""
 
 def uruchom_automatyzacje():
-    print("🛡️ Uruchamiam bota (Pełna agregacja raportu DEV - Krok 2)...")
+    print("🛡️ Uruchamiam bota (Pełna agregacja raportu DEV - Krok 3: SQLite)...")
+    
+    # Inicjalizacja lokalnej bazy danych
+    inicjalizuj_baze()
     
     raport_otwarte_pozycje = ""
     raport_trailing_stop = ""
     
-    # Krok 2: Limit dzienny nowych wejść (Circuit Breaker)
     MAX_NOWE_WEJSCIA_DZIS = 3
     otworzone_dzis_licznik = 0
     
@@ -319,7 +387,7 @@ def uruchom_automatyzacje():
     print("\n🌎 Analizuję stan szerokiego rynku (Indeks S&P 500)...")
     rynek_rosnie, spy_cena, spy_sma50 = analizuj_szeroki_rynek()
 
-    print("\n🛡️ Analizuję otwarte pozycje w poszukiwaniu okazji do Trailing Stopa (ochrona zysków)...")
+    print("\n🛡️ Analizuję otwarte pozycje w poszukiwaniu okazji do Trailing Stopa...")
     otwarte_szczegoly = pobierz_otwarte_pozycje_szczegoly()
     posiadane_tickery = []
     
@@ -347,9 +415,11 @@ def uruchom_automatyzacje():
                             sukces_zamkniecia, _ = zamknij_pozycje_demo(tckr)
                             
                             if sukces_zamkniecia:
-                                raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20. Pozycja została *automatycznie zamknięta*. Zrealizowany zysk: `+{zysk_pln:.2f} PLN`.\n"
+                                # Zapis do bazy danych SQLite
+                                zapisz_zamkniecie_w_bazie(tckr, cena_ts, zysk_pln)
+                                raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20. Pozycja zamknięta automatycznie. Zysk: `+{zysk_pln:.2f} PLN`.\n"
                             else:
-                                raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena ({cena_ts:.2f}$) spadła poniżej SMA20 (Zysk: `+{zysk_pln:.2f} PLN`), ale próba automatycznego zamknięcia nie powiodła się.\n"
+                                raport_trailing_stop += f"🚨 *{nazwa_spolki}*: Cena spadła poniżej SMA20 (Zysk: `+{zysk_pln:.2f} PLN`), ale próba automatycznego zamknięcia nie powiodła się.\n"
 
     for nazwa, info in aktywa_do_handlu.items():
         if otworzone_dzis_licznik >= MAX_NOWE_WEJSCIA_DZIS:
@@ -390,7 +460,11 @@ def uruchom_automatyzacje():
             if sukces:
                 free_cash -= szacowany_koszt_pln
                 otworzone_dzis_licznik += 1
-                print(f"🚀 SUKCES: {nazwa} - Wysłano zlecenie! Zaktualizowano dostępne środki: {free_cash:.2f} PLN (Licznik dzisiejszych wejść: {otworzone_dzis_licznik}/{MAX_NOWE_WEJSCIA_DZIS})")
+                
+                # Zapis otwarcia nowej pozycji w lokalnej bazie SQLite
+                zapisz_otwarcie_w_bazie(info["t212"], nazwa, wolumen, cena_usd, poziom_sl, poziom_tp)
+                
+                print(f"🚀 SUKCES: {nazwa} - Wysłano zlecenie! Zaktualizowano dostępne środki: {free_cash:.2f} PLN")
                 
                 notatka_blokady = " (⚠️ Zmniejszono do 5% kapitału)" if (wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka) else ""
                 
@@ -402,17 +476,27 @@ def uruchom_automatyzacje():
 
     print("\n📩 Generowanie i wysyłanie raportu na Telegram...")
     
-    wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV - KROK 2)* 📊\n\n"
-    if not rynek_rosnie: wiadomosc_koncowa += "⚠️ *Filtr S&P 500:* Rynek znajduje się w trendzie spadkowym. Szukanie nowych pozycji długich (LONG) zostało na dziś zablokowane.\n\n"
+    # Pobranie statystyk z bazy danych do podsumowania
+    zamkniete_razem, suma_pnl_razem = pobierz_statystyki_bazy()
+    
+    wiadomosc_koncowa = "📊 *DZIENNY RAPORT BOTA COPILOT (DEV - KROK 3)* 📊\n\n"
+    if not rynek_rosnie: wiadomosc_koncowa += "⚠️ *Filtr S&P 500:* Rynek znajduje się w trendzie spadkowym. Nowe pozycje długie (LONG) zablokowane.\n\n"
          
     if raport_trailing_stop == "" and raport_otwarte_pozycje == "":
-        wiadomosc_koncowa += "💤 *Brak nowych akcji na dziś.*\nSystem nie znalazł bezpiecznych okazji spełniających restrykcyjne kryteria i nie wykrył zagrożeń dla otwartych pozycji."
+        wiadomosc_koncowa += "💤 *Brak nowych akcji na dziś.*\nSystem nie znalazł okazji spełniających kryteria i nie wykrył zagrożeń dla otwartych pozycji.\n\n"
     else:
-        if raport_trailing_stop: wiadomosc_koncowa += "🛡️ *AUTOMATYCZNY TRAILING STOP (Ochrona Zysku)*\n" + raport_trailing_stop + "\n"
+        if raport_trailing_stop: wiadomosc_koncowa += "🛡️ *AUTOMATYCZNY TRAILING STOP*\n" + raport_trailing_stop + "\n"
         if raport_otwarte_pozycje: wiadomosc_koncowa += "🚀 *NOWE POZYCJE (KONTO DEMO)*\n" + raport_otwarte_pozycje
+
+    # Doklejenie statystyk z bazy danych SQLite
+    wiadomosc_koncowa += (
+        f"📈 *STATYSTYKI BAZY DANYCH (SQLite)*\n"
+        f"   • Zamknięte pozycje ogółem: `{zamkniete_razem}`\n"
+        f"   • Łączny wynik PnL: `{suma_pnl_razem:+.2f} PLN`\n"
+    )
             
     wyslij_telegram(wiadomosc_koncowa)
-    print("✅ Zakończono działanie skryptu i wysłano raport!")
+    print("✅ Zakończono działanie skryptu i wysłano raport ze statystykami SQLite!")
 
 if __name__ == "__main__":
     uruchom_automatyzacje()
