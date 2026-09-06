@@ -43,7 +43,8 @@ def pobierz_dziennik_z_bazy():
     inicjalizuj_baze()
     conn = sqlite3.connect(DB_NAME)
     df = pd.read_sql_query(
-        "SELECT id, ticker, nazwa, quantity, entry_price, sl, tp, entry_date, status, exit_price, pnl "
+        "SELECT id, ticker, nazwa, quantity, entry_price, sl, tp, "
+        "entry_date, status, exit_price, pnl "
         "FROM transakcje ORDER BY entry_date",
         conn
     )
@@ -89,7 +90,7 @@ def dodaj_transakcje_reczna(
         nazwa,
         quantity,
         entry_price,
-        0.0,          # SL ręczny (opcjonalnie możesz później dodać do form)
+        0.0,          # SL ręczny (opcjonalnie można później dodać do form)
         0.0,          # TP ręczny
         entry_date,
         status_db,
@@ -98,6 +99,20 @@ def dodaj_transakcje_reczna(
     ))
     conn.commit()
     conn.close()
+
+def policz_sharpe_z_pnl(pnls: pd.Series) -> float:
+    """
+    Uproszczony Sharpe: średni PnL na transakcję podzielony przez odchylenie
+    standardowe PnL (na zamkniętych transakcjach).[web:75]
+    """
+    if pnls is None or len(pnls) < 2:
+        return 0.0
+    pnls_clean = pd.to_numeric(pnls, errors="coerce").dropna()
+    if len(pnls_clean) < 2:
+        return 0.0
+    mean_pnl = pnls_clean.mean()
+    std_pnl = pnls_clean.std()
+    return float(mean_pnl / std_pnl) if std_pnl > 0 else 0.0
 
 # --- KONFIGURACJA STRONY STREAMLIT ---
 st.set_page_config(page_title="AI Trading Copilot Pro", layout="wide", page_icon="📈")
@@ -510,11 +525,15 @@ with tab5:
         "Trading212 – tutaj widzisz jednocześnie transakcje automatyczne i ręczne."
     )
 
+    # --- FORMULARZ DODAWANIA TRANSAKCJI RĘCZNEJ DO SQLITE ---
     with st.expander("➕ Dodaj nową transakcję ręcznie do SQLite", expanded=False):
         with st.form("nowa_transakcja_form"):
             c_f1, c_f2, c_f3 = st.columns(3)
             t_aktywo = c_f1.text_input("Ticker (np. TSLA, CDR.WA):", value=ticker)
-            t_nazwa = c_f2.text_input("Nazwa aktywa (opis):", value=wybor_predefiniowany if wybor_predefiniowany != "Wpisz własny..." else t_aktywo)
+            t_nazwa = c_f2.text_input(
+                "Nazwa aktywa (opis):",
+                value=wybor_predefiniowany if wybor_predefiniowany != "Wpisz własny..." else t_aktywo
+            )
             t_wolumen = c_f3.number_input("Wolumen:", min_value=0.01, value=1.0, step=0.1)
             
             c_f4, c_f5, c_f6 = st.columns(3)
@@ -541,11 +560,57 @@ with tab5:
                     st.error(f"Błąd zapisu do bazy SQLite: {e}")
                 
     st.markdown("---")
-    st.markdown("### 📊 Statystyki i Krzywa Kapitału (z bazy SQLite)")
+    st.markdown("### 📊 Statystyki, filtry i krzywa kapitału (z bazy SQLite)")
+
     df_dziennik = pobierz_dziennik_z_bazy()
     
     if not df_dziennik.empty:
-        zamkniete = df_dziennik[df_dziennik['status'] == 'CLOSED'].copy()
+        # Konwersja daty do datetime dla filtrów
+        df_dziennik['entry_date'] = pd.to_datetime(df_dziennik['entry_date'], errors='coerce')
+
+        # --- FILTRY ---
+        c_flt1, c_flt2, c_flt3 = st.columns(3)
+        unikalne_tickery = sorted(df_dziennik['ticker'].dropna().unique().tolist())
+        filtr_ticker = c_flt1.multiselect(
+            "Filtr: Ticker",
+            options=unikalne_tickery,
+            default=unikalne_tickery
+        )
+
+        filtr_status = c_flt2.multiselect(
+            "Filtr: Status",
+            options=["OPEN", "CLOSED"],
+            default=["OPEN", "CLOSED"]
+        )
+
+        min_date = df_dziennik['entry_date'].min()
+        max_date = df_dziennik['entry_date'].max()
+        if pd.isna(min_date) or pd.isna(max_date):
+            min_date = datetime.now()
+            max_date = datetime.now()
+        filtr_data_od = c_flt3.date_input(
+            "Data od:",
+            value=min_date.date()
+        )
+        filtr_data_do = c_flt3.date_input(
+            "Data do:",
+            value=max_date.date()
+        )
+
+        # Zastosowanie filtrów
+        df_filt = df_dziennik.copy()
+        if filtr_ticker:
+            df_filt = df_filt[df_filt['ticker'].isin(filtr_ticker)]
+        if filtr_status:
+            df_filt = df_filt[df_filt['status'].isin(filtr_status)]
+        if filtr_data_od and filtr_data_do:
+            df_filt = df_filt[
+                (df_filt['entry_date'].dt.date >= filtr_data_od) &
+                (df_filt['entry_date'].dt.date <= filtr_data_do)
+            ]
+
+        # --- STATYSTYKI NA BAZIE PRZEFILTROWANYCH DANYCH ---
+        zamkniete = df_filt[df_filt['status'] == 'CLOSED'].copy()
         
         if not zamkniete.empty:
             zamkniete['pnl'] = pd.to_numeric(zamkniete['pnl'], errors='coerce')
@@ -553,33 +618,64 @@ with tab5:
             total_trades = len(zamkniete)
             zyskownych = len(zamkniete[zamkniete['pnl'] > 0])
             stratnych = len(zamkniete[zamkniete['pnl'] <= 0])
-            win_rate = (zyskownych / total_trades) * 100 if total_trades > 0 else 0
+            win_rate = (zyskownych / total_trades) * 100 if total_trades > 0 else 0.0
             suma_wynikow = zamkniete['pnl'].sum()
-            
-            c_s1, c_s2, c_s3, c_s4 = st.columns(4)
-            c_s1.metric("Zamknięte pozycje", total_trades)
+            sharpe = policz_sharpe_z_pnl(zamkniete['pnl'])
+
+            c_s1, c_s2, c_s3, c_s4, c_s5 = st.columns(5)
+            c_s1.metric("Zamknięte pozycje (filtr)", total_trades)
             c_s2.metric("Skuteczność (Win Rate)", f"{win_rate:.1f}%")
             c_s3.metric("Zysk / Strata", f"{zyskownych} / {stratnych}")
-            c_s4.metric("Całkowity Wynik (PnL)", f"{suma_wynikow:.2f} PLN")
-            
-            zamkniete['Krzywa Kapitału'] = zamkniete['pnl'].cumsum()
+            c_s4.metric("Całkowity PnL (filtr)", f"{suma_wynikow:.2f} PLN")
+            c_s5.metric("Sharpe (filtr)", f"{sharpe:.2f}")
+
+            # Krzywa kapitału
+            zamkniete_sorted = zamkniete.sort_values("entry_date").copy()
+            zamkniete_sorted['Krzywa Kapitału'] = zamkniete_sorted['pnl'].cumsum()
             fig_eq = go.Figure()
             fig_eq.add_trace(go.Scatter(
-                x=zamkniete['entry_date'],
-                y=zamkniete['Krzywa Kapitału'],
+                x=zamkniete_sorted['entry_date'],
+                y=zamkniete_sorted['Krzywa Kapitału'],
                 mode='lines+markers',
                 name='Krzywa PnL',
                 line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)
             ))
             fig_eq.update_layout(
-                title="Krzywa Zysków i Strat (SQLite)", 
+                title="Krzywa Zysków i Strat (SQLite, po filtrach)", 
                 template="plotly_dark", 
                 height=350,
                 margin=dict(l=20, r=20, t=40, b=20)
             )
             st.plotly_chart(fig_eq, use_container_width=True)
-            
-        st.markdown("### 📝 Pełna historia operacji (z bazy SQLite)")
-        st.dataframe(df_dziennik, use_container_width=True)
+        else:
+            st.info("Brak zamkniętych transakcji w przefiltrowanym zakresie.")
+
+        # --- EKSPORT DANYCH (PRZEFILTROWANY WIDOK) ---
+        st.markdown("### 📤 Eksport przefiltrowanego dziennika")
+        csv_bytes = df_filt.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Pobierz jako CSV",
+            data=csv_bytes,
+            file_name="dziennik_transakcji_filtrowany.csv",
+            mime="text/csv"
+        )
+
+        try:
+            excel_buffer = pd.ExcelWriter("temp_export.xlsx", engine="xlsxwriter")
+            df_filt.to_excel(excel_buffer, index=False, sheet_name="Transakcje")
+            excel_buffer.close()
+            with open("temp_export.xlsx", "rb") as f:
+                excel_bytes = f.read()
+            st.download_button(
+                label="📥 Pobierz jako Excel",
+                data=excel_bytes,
+                file_name="dziennik_transakcji_filtrowany.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        except Exception as e:
+            st.warning(f"Nie udało się wygenerować pliku Excel: {e}")
+
+        st.markdown("### 📝 Pełna historia operacji (po filtrach)")
+        st.dataframe(df_filt, use_container_width=True)
     else:
         st.info("Baza `transakcje` jest obecnie pusta – brak danych do wyświetlenia.")
