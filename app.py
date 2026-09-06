@@ -8,75 +8,35 @@ import feedparser
 from textblob import TextBlob
 from datetime import datetime
 import os
-import requests
+import re
+
+# Poprawny import modułu z podfolderu modules
+from modules import indicators
 
 # Konfiguracja strony
-st.set_page_config(page_title="AI Trading Copilot Pro (DEV)", layout="wide", page_icon="📈")
+st.set_page_config(page_title="AI Trading Copilot Pro", layout="wide", page_icon="📈")
 
-# Inicjalizacja pamięci podręcznej (Zamrożenie analizy AI)
-if 'ai_data' not in st.session_state:
-    st.session_state.ai_data = None
+st.title("🤖 AI Trading & Investment Copilot")
+st.caption("Wsparcie decyzji inwestycyjnych: Wall Street, GPW, Surowce, CFD (XTB)")
 
-# --- POBIERANIE KLUCZY API Z SECRETS ---
-try:
-    T212_KEY = st.secrets["T212_API_KEY"]
-    T212_SEC = st.secrets["T212_API_SECRET"]
-except:
-    T212_KEY = None
-    T212_SEC = None
-
-try:
-    HF_TOKEN = st.secrets["HF_API_TOKEN"]
-except:
-    HF_TOKEN = None
-    
-T212_BASE_URL = "https://demo.trading212.com/api/v0/equity"
-
-st.title("🤖 AI Trading & Investment Copilot (DEV)")
-st.caption("Wersja testowa: Automatyczny bot, podgląd T212, Blokada 10% i silnik FinBERT AI.")
-
-# --- ROZBUDOWANA BAZA AKTYWÓW ---
+# Predefiniowana baza aktywów
 popularne_aktywa = {
-    # --- USA: TOPOWE SPÓŁKI TECHNOLOGICZNE I FINANSOWE ---
+    "Złoto CFD / Futures (GC=F)": {"ticker": "GC=F", "search_term": "Gold price commodity market"},
+    "Ropa WTI (CL=F)": {"ticker": "CL=F", "search_term": "Crude oil price energy market"},
+    "NVIDIA (NVDA)": {"ticker": "NVDA", "search_term": "NVIDIA stock news"},
     "Apple (AAPL)": {"ticker": "AAPL", "search_term": "Apple stock market news"},
     "Microsoft (MSFT)": {"ticker": "MSFT", "search_term": "Microsoft stock news"},
-    "NVIDIA (NVDA)": {"ticker": "NVDA", "search_term": "NVIDIA stock news"},
-    "Alphabet / Google (GOOGL)": {"ticker": "GOOGL", "search_term": "Google stock market news"},
-    "Amazon (AMZN)": {"ticker": "AMZN", "search_term": "Amazon stock market news"},
-    "Meta / Facebook (META)": {"ticker": "META", "search_term": "Meta Facebook stock news"},
     "Tesla (TSLA)": {"ticker": "TSLA", "search_term": "Tesla stock market news"},
-    "Broadcom (AVGO)": {"ticker": "AVGO", "search_term": "Broadcom stock news"},
-    "JPMorgan (JPM)": {"ticker": "JPM", "search_term": "JPMorgan stock market news"},
-    "Visa (V)": {"ticker": "V", "search_term": "Visa stock market news"},
-    "Walmart (WMT)": {"ticker": "WMT", "search_term": "Walmart stock news"},
-
-    # --- GPW: TOPOWE SPÓŁKI (WIG20) ---
-    "PKO BP (PKO.WA)": {"ticker": "PKO.WA", "search_term": "PKO BP bank gielda GPW"},
-    "Orlen (ORL.WA)": {"ticker": "ORL.WA", "search_term": "Orlen gielda GPW"},
+    "S&P 500 ETF (SPY)": {"ticker": "SPY", "search_term": "S&P 500 index market today"},
     "CD Projekt (CDR.WA)": {"ticker": "CDR.WA", "search_term": "CD Projekt gielda akcje"},
-    "PZU (PZU.WA)": {"ticker": "PZU.WA", "search_term": "PZU gielda GPW"},
-    "Dino Polska (DNP.WA)": {"ticker": "DNP.WA", "search_term": "Dino Polska gielda GPW"},
+    "Orlen (PKN.WA)": {"ticker": "PKN.WA", "search_term": "PKN Orlen gielda GPW"},
+    "PKO BP (PKO.WA)": {"ticker": "PKO.WA", "search_term": "PKO BP bank gielda GPW"},
     "KGHM (KGH.WA)": {"ticker": "KGH.WA", "search_term": "KGHM miedz gielda GPW"},
-    "Allegro (ALE.WA)": {"ticker": "ALE.WA", "search_term": "Allegro gielda GPW"},
-    "LPP (LPP.WA)": {"ticker": "LPP.WA", "search_term": "LPP gielda GPW"},
-    "Bank Pekao (PEO.WA)": {"ticker": "PEO.WA", "search_term": "Bank Pekao gielda GPW"},
-    "mBank (MBK.WA)": {"ticker": "MBK.WA", "search_term": "mBank gielda GPW"},
-
-    # --- TOP 10 ETF / ETN NA ŚWIECIE ---
-    "S&P 500 ETF (SPY)": {"ticker": "SPY", "search_term": "S&P 500 ETF news"},
-    "Nasdaq 100 ETF (QQQ)": {"ticker": "QQQ", "search_term": "Nasdaq 100 ETF news"},
-    "Vanguard Total World (VT)": {"ticker": "VT", "search_term": "Vanguard Total World Stock ETF"},
-    "Vanguard All-World (VWCE.DE)": {"ticker": "VWCE.DE", "search_term": "VWCE ETF market news"},
-    "Emerging Markets ETF (VWO)": {"ticker": "VWO", "search_term": "Emerging markets ETF news"},
-    "Dividend ETF (SCHD)": {"ticker": "SCHD", "search_term": "Schwab Dividend ETF news"},
-    "Gold Trust ETF (GLD)": {"ticker": "GLD", "search_term": "SPDR Gold Trust ETF news"},
-    "20+ Year Treasury Bonds (TLT)": {"ticker": "TLT", "search_term": "iShares 20+ Year Treasury Bond ETF"},
-    "Real Estate REITs (VNQ)": {"ticker": "VNQ", "search_term": "Vanguard Real Estate ETF"},
-    "ARK Innovation (ARKK)": {"ticker": "ARKK", "search_term": "ARK Innovation ETF news"}
+    "Dino Polska (DNP.WA)": {"ticker": "DNP.WA", "search_term": "Dino Polska gielda GPW"}
 }
 
 # --- FUNKCJE DZIENNIKA TRANSAKCJI ---
-PLIK_DZIENNIKA = "dziennik_transakcji_dev.csv"
+PLIK_DZIENNIKA = "dziennik_transakcji.csv"
 
 def wczytaj_dziennik():
     if os.path.exists(PLIK_DZIENNIKA):
@@ -84,7 +44,7 @@ def wczytaj_dziennik():
             return pd.read_csv(PLIK_DZIENNIKA)
         except:
             pass
-    return pd.DataFrame(columns=["Data", "Aktywo", "Kierunek", "Wolumen", "Cena Otwarcia", "Status", "Wynik"])
+    return pd.DataFrame(columns=["Data", "Aktywo", "Kierunek", "Wolumen", "Cena Otwarcia", "Status", "Wynik (PLN)"])
 
 def zapisz_w_dzienniku(nowy_wpis):
     df = wczytaj_dziennik()
@@ -96,21 +56,22 @@ st.sidebar.header("⚙️ Ustawienia analizy")
 wybor_predefiniowany = st.sidebar.selectbox("Wybierz z listy:", ["Wpisz własny..."] + list(popularne_aktywa.keys()))
 
 if wybor_predefiniowany == "Wpisz własny...":
-    ticker = st.sidebar.text_input("Wpisz Ticker (np. AAPL, TSLA):", value="NVDA").upper()
-    search_query = ticker + " stock market news"
+    ticker = st.sidebar.text_input("Wpisz Ticker (np. TSLA, KGH.WA, GC=F):", value="GC=F").upper()
+    search_query = ticker.replace(".WA", "") + " stock market news"
 else:
     ticker = popularne_aktywa[wybor_predefiniowany]["ticker"]
     search_query = popularne_aktywa[wybor_predefiniowany]["search_term"]
 
-okres = st.sidebar.selectbox("Zakres czasu:", ["1mo", "3mo", "6mo", "1y", "2y"], index=2)
+# Ustawiamy okres na 2y domyślnie, aby SMA200 poprawnie się wyliczało
+okres = st.sidebar.selectbox("Zakres czasu:", ["1mo", "3mo", "6mo", "1y", "2y"], index=4)
 interwal = st.sidebar.selectbox("Interwał:", ["1d", "1wk"], index=0)
 
 st.sidebar.markdown("---")
-st.sidebar.header("⚖️ Kalkulator Wielkości Pozycji")
+st.sidebar.header("⚖️ Kalkulator Wielkości Pozycji (XTB)")
 kapital = st.sidebar.number_input("Twój kapitał (PLN / USD):", min_value=100.0, value=10000.0, step=500.0)
 ryzyko_proc = st.sidebar.slider("Dopuszczalne ryzyko transakcji (%):", min_value=0.5, max_value=5.0, value=1.5, step=0.5)
 
-# --- FUNKCJE DANYCH I ZAAWANSOWANYCH WSKAŹNIKÓW ---
+# --- FUNKCJE DANYCH I ZAAWANSOWANYCH WSKAŹNIKÓW Z MODUŁU ---
 @st.cache_data(ttl=180)
 def pobierz_dane(symbol, period, interval):
     try:
@@ -119,30 +80,8 @@ def pobierz_dane(symbol, period, interval):
             if isinstance(dane.columns, pd.MultiIndex):
                 dane.columns = dane.columns.get_level_values(0)
             
-            dane['SMA20'] = dane['Close'].rolling(window=20).mean()
-            dane['SMA50'] = dane['Close'].rolling(window=50).mean()
-            
-            delta = dane['Close'].diff()
-            gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-            loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-            rs = gain / loss
-            dane['RSI'] = 100 - (100 / (1 + rs))
-            
-            std20 = dane['Close'].rolling(window=20).std()
-            dane['BB_Upper'] = dane['SMA20'] + (std20 * 2)
-            dane['BB_Lower'] = dane['SMA20'] - (std20 * 2)
-            
-            ema12 = dane['Close'].ewm(span=12, adjust=False).mean()
-            ema26 = dane['Close'].ewm(span=26, adjust=False).mean()
-            dane['MACD'] = ema12 - ema26
-            dane['MACD_Signal'] = dane['MACD'].ewm(span=9, adjust=False).mean()
-            dane['MACD_Hist'] = dane['MACD'] - dane['MACD_Signal']
-            
-            tr1 = dane['High'] - dane['Low']
-            tr2 = (dane['High'] - dane['Close'].shift()).abs()
-            tr3 = (dane['Low'] - dane['Close'].shift()).abs()
-            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-            dane['ATR'] = tr.rolling(window=14).mean()
+            # Wywołanie funkcji z zewnętrznego modułu modules/indicators.py
+            dane = indicators.dodaj_zaawansowane_wskazniki(dane)
             
         return dane
     except Exception:
@@ -158,12 +97,18 @@ ostatnia_cena = float(df['Close'].iloc[-1])
 poprzednia_cena = float(df['Close'].iloc[-2])
 zmiana_proc = ((ostatnia_cena - poprzednia_cena) / poprzednia_cena) * 100
 ostatni_rsi = float(df['RSI'].iloc[-1]) if not pd.isna(df['RSI'].iloc[-1]) else 50.0
-ostatnie_sma50 = float(df['SMA50'].iloc[-1]) if not pd.isna(df['SMA50'].iloc[-1]) else ostatnia_cena
+ostatnie_sma50 = float(df['SMA50'].iloc[-1]) if 'SMA50' in df.columns and not pd.isna(df['SMA50'].iloc[-1]) else ostatnia_cena
+ostatnie_sma200 = float(df['SMA200'].iloc[-1]) if 'SMA200' in df.columns and not pd.isna(df['SMA200'].iloc[-1]) else ostatnie_sma50
+bb_lower = float(df['BB_Lower'].iloc[-1]) if 'BB_Lower' in df.columns and not pd.isna(df['BB_Lower'].iloc[-1]) else ostatnia_cena
+bb_upper = float(df['BB_Upper'].iloc[-1]) if 'BB_Upper' in df.columns and not pd.isna(df['BB_Upper'].iloc[-1]) else ostatnia_cena
+obv = float(df['OBV'].iloc[-1]) if 'OBV' in df.columns and not pd.isna(df['OBV'].iloc[-1]) else 0.0
+obv_sma = float(df['OBV_SMA'].iloc[-1]) if 'OBV_SMA' in df.columns and not pd.isna(df['OBV_SMA'].iloc[-1]) else 0.0
 ostatni_macd = float(df['MACD'].iloc[-1]) if not pd.isna(df['MACD'].iloc[-1]) else 0.0
 ostatni_macd_sig = float(df['MACD_Signal'].iloc[-1]) if not pd.isna(df['MACD_Signal'].iloc[-1]) else 0.0
 ostatni_atr = float(df['ATR'].iloc[-1]) if not pd.isna(df['ATR'].iloc[-1]) else (ostatnia_cena * 0.02)
 
 # --- MODUŁ POBIERANIA WIADOMOŚCI ---
+@st.cache_data(ttl=300)
 def pobierz_swieze_newsy(symbol, query):
     news_list = []
     try:
@@ -182,8 +127,12 @@ def pobierz_swieze_newsy(symbol, query):
         pass
 
     if len(news_list) < 2:
+        is_pl = symbol.endswith(".WA")
+        lang = "pl" if is_pl else "en-US"
+        gl = "PL" if is_pl else "US"
+        ceid = "PL:pl" if is_pl else "US:en"
         clean_q = query.replace(" ", "+")
-        rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=en-US&gl=US&ceid=US:en"
+        rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:3d&hl={lang}&gl={gl}&ceid={ceid}"
         feed = feedparser.parse(rss_url)
         if feed.entries:
             for entry in feed.entries[:6]:
@@ -195,155 +144,138 @@ def pobierz_swieze_newsy(symbol, query):
                 })
     return news_list
 
-# --- INTELIGENTNA BRAMKA FinBERT ---
-def analizuj_sentyment_finbert(tytuly, token):
-    if not token or not tytuly:
-        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Brak tokenu w chmurze ⚪)"
-    
-    # NOWY endpoint Hugging Face z pominięciem przestarzałego api-inference
-    url = "https://router.huggingface.co/hf-inference/models/ProsusAI/finbert"
-    headers = {"Authorization": f"Bearer {token}"}
-    
-    try:
-        response = requests.post(url, headers=headers, json={"inputs": tytuly}, timeout=15)
-        if response.status_code == 200:
-            wyniki = response.json()
-            scores = []
-            for res in wyniki:
-                najlepszy = max(res, key=lambda x: x['score'])
-                if najlepszy['label'] == 'positive':
-                    scores.append(najlepszy['score'])
-                elif najlepszy['label'] == 'negative':
-                    scores.append(-najlepszy['score'])
-                else:
-                    scores.append(0.0)
-            return scores, "FinBERT (HuggingFace API 🟢)"
-        elif response.status_code == 503:
-            st.toast("⚠️ Model FinBERT wybudza się z uśpienia. Użyto zapasowego TextBlob.", icon="⏳")
-            return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (FinBERT 503 - Wybudzanie ⏳)"
-        else:
-            return [TextBlob(t).sentiment.polarity for t in tytuly], f"TextBlob (Błąd API: {response.status_code} 🔴)"
-    except Exception as e:
-        return [TextBlob(t).sentiment.polarity for t in tytuly], "TextBlob (Błąd połączenia 🔴)"
+surowe_newsy = pobierz_swieze_newsy(ticker, search_query)
+sentymenty = []
+news_items = []
 
-# --- GŁÓWNY PANEL GÓRNY (Surowe Metryki) ---
+for item in surowe_newsy:
+    analiza = TextBlob(item["tytul"])
+    polaryzacja = analiza.sentiment.polarity
+    sentymenty.append(polaryzacja)
+    kolor = "🟢 Pozytywny" if polaryzacja > 0.05 else ("🔴 Negatywny" if polaryzacja < -0.05 else "⚪ Neutralny")
+    news_items.append({
+        "tytul": item["tytul"],
+        "score": polaryzacja,
+        "status": kolor,
+        "data": item["data"],
+        "zrodlo": item["zrodlo"],
+        "link": item["link"]
+    })
+
+avg_sent = sum(sentymenty) / len(sentymenty) if sentymenty else 0.0
+
+# --- ROZBUDOWANY SILNIK DECYZYJNY (Z reżimem rynku, Bollingerem i OBV) ---
+punkty_bycze = 0
+punkty_niedzwiedzie = 0
+jakosc_flags = []
+
+# 1. Reżim Rynku (SMA50 vs SMA200)
+if ostatnie_sma50 > ostatnie_sma200:
+    punkty_bycze += 1
+    trend_opis = "HOSSA (SMA50 > SMA200)"
+    jakosc_flags.append("✅ Reżim rynkowy: Hossa")
+else:
+    punkty_niedzwiedzie += 1
+    trend_opis = "BESSA / KONSOLIDACJA (SMA50 < SMA200)"
+    jakosc_flags.append("⚠️ Reżim rynkowy: Ostrożnie (Bessa/Konsolidacja)")
+
+# 2. Wstęgi Bollingera (Mean-Reversion)
+if ostatnia_cena <= bb_lower:
+    punkty_bycze += 2
+    jakosc_flags.append("🟢 Ekstremalne wyprzedanie (Dolna wstęga Bollingera)")
+elif ostatnia_cena >= bb_upper:
+    punkty_niedzwiedzie += 2
+    jakosc_flags.append("🔴 Ekstremalne wykupienie (Górna wstęga Bollingera)")
+
+# 3. OBV (Wolumen)
+if obv > obv_sma:
+    punkty_bycze += 1
+    jakosc_flags.append("📈 Wolumen wspiera ruch (OBV > SMA)")
+else:
+    punkty_niedzwiedzie += 1
+    jakosc_flags.append("📉 Brak wsparcia wolumenowego (OBV < SMA)")
+
+# 4. RSI
+if ostatni_rsi < 35:
+    punkty_bycze += 1
+    rsi_opis = "Wyprzedanie (RSI < 35)"
+elif ostatni_rsi > 70:
+    punkty_niedzwiedzie += 1
+    rsi_opis = "Wykupienie (RSI > 70)"
+else:
+    rsi_opis = "RSI Neutralny"
+
+# 5. MACD
+if ostatni_macd > ostatni_macd_sig:
+    punkty_bycze += 1
+    macd_opis = "MACD > Sygnał (Prowzrostowo)"
+else:
+    punkty_niedzwiedzie += 1
+    macd_opis = "MACD < Sygnał (Prospadkowo)"
+
+# 6. Sentyment
+if avg_sent > 0.05:
+    punkty_bycze += 1
+    sent_opis = "Pozytywny / Byczy"
+elif avg_sent < -0.05:
+    punkty_niedzwiedzie += 1
+    sent_opis = "Negatywny / Niedźwiedzi"
+else:
+    sent_opis = "Neutralny"
+
+# Werdykt (wyższe progi ze względu na bogatszy zestaw wskaźników)
+if punkty_bycze >= 4:
+    werdykt_status = "MOCNY KANDYDAT NA LONGA (KUPNO)"
+    werdykt_kolor = "success"
+    werdykt_komentarz = "Przewaga sygnałów prowzrostowych w połączeniu z reżimem rynkowym."
+elif punkty_niedzwiedzie >= 4:
+    werdykt_status = "OSTRZEŻENIE / KANDYDAT NA SHORTA"
+    werdykt_kolor = "error"
+    werdykt_komentarz = "Przewaga sygnałów prospadkowych lub silnego przegrzania."
+else:
+    werdykt_status = "NEUTRALNY / OBSERWACJA"
+    werdykt_kolor = "info"
+    werdykt_komentarz = "Rynek w konsolidacji lub sygnały są sprzeczne. Wstrzymaj się."
+
+# --- GŁÓWNY PANEL GÓRNY ---
 c1, c2, c3, c4, c5 = st.columns(5)
 c1.metric("Ticker", ticker)
 c2.metric("Kurs", f"{ostatnia_cena:.2f}", f"{zmiana_proc:+.2f}%")
-c3.metric("RSI (14)", f"{ostatni_rsi:.1f}")
-c4.metric("MACD", f"{ostatni_macd:.2f}")
-c5.metric("ATR (14)", f"{ostatni_atr:.2f}")
+c3.metric("Reżim Rynku", trend_opis)
+c4.metric("RSI (14)", f"{ostatni_rsi:.1f}", rsi_opis)
+c5.metric("Zmienność ATR (14)", f"{ostatni_atr:.2f}", "Średni zasięg świecy")
 
-st.markdown("---")
-
-# --- ZAMROŻONY WERDYKT AI (State Management + FinBERT) ---
-verdict_placeholder = st.empty()
-
-if st.button("🔄 Odśwież Werdykt (Analiza AI)"):
-    with st.spinner(f"Analizuję wiadomości przez sieć neuronową dla {ticker}..."):
-        surowe_newsy = pobierz_swieze_newsy(ticker, search_query)
-        tytuly = [item["tytul"] for item in surowe_newsy]
-        
-        # Poprawne rozpakowanie wartości z funkcji
-        sentymenty_wartosci, silnik_info = analizuj_sentyment_finbert(tytuly, HF_TOKEN)
-        
-        sentymenty = []
-        news_items = []
-        for i, item in enumerate(surowe_newsy):
-            # Odpowiednie wyciągnięcie zmiennej float dla każdego nagłówka
-            polaryzacja = float(sentymenty_wartosci[i]) if i < len(sentymenty_wartosci) else float(TextBlob(item["tytul"]).sentiment.polarity)
-            sentymenty.append(polaryzacja)
-            kolor = "🟢 Pozytywny" if polaryzacja > 0.05 else ("🔴 Negatywny" if polaryzacja < -0.05 else "⚪ Neutralny")
-            news_items.append({
-                "tytul": item["tytul"], "score": polaryzacja, "status": kolor, 
-                "data": item["data"], "zrodlo": item["zrodlo"], "link": item["link"]
-            })
-            
-        avg_sent = sum(sentymenty) / len(sentymenty) if sentymenty else 0.0
-
-        punkty_bycze = 0
-        punkty_niedzwiedzie = 0
-
-        if ostatnia_cena > ostatnie_sma50:
-            punkty_bycze += 1; t_opis = "Trend wzrostowy (Cena > SMA50)"
-        else:
-            punkty_niedzwiedzie += 1; t_opis = "Trend spadkowy (Cena < SMA50)"
-
-        if ostatni_rsi < 35:
-            punkty_bycze += 1; r_opis = "Wyprzedanie (RSI < 35)"
-        elif ostatni_rsi > 70:
-            punkty_niedzwiedzie += 1; r_opis = "Wykupienie (RSI > 70)"
-        else:
-            r_opis = "RSI Neutralny"
-
-        if ostatni_macd > ostatni_macd_sig:
-            punkty_bycze += 1; m_opis = "MACD > Sygnał (Prowzrostowo)"
-        else:
-            punkty_niedzwiedzie += 1; m_opis = "MACD < Sygnał (Porspadkowo)"
-
-        if avg_sent > 0.05:
-            punkty_bycze += 1; s_opis = "Pozytywny"
-        elif avg_sent < -0.05:
-            punkty_niedzwiedzie += 1; s_opis = "Negatywny"
-        else:
-            s_opis = "Neutralny"
-
-        if punkty_bycze >= 3:
-            w_stat = "MOCNY KANDYDAT NA LONGA (KUPNO)"
-            w_kolor = "success"
-            w_kom = "Przewaga sygnałów prowzrostowych. Szukaj wejścia."
-        elif punkty_niedzwiedzie >= 3:
-            w_stat = "OSTRZEŻENIE / KANDYDAT NA SHORTA"
-            w_kolor = "error"
-            w_kom = "Przewaga sygnałów spadkowych lub silne przegrzanie rynku."
-        else:
-            w_stat = "NEUTRALNY / OBSERWACJA"
-            w_kolor = "info"
-            w_kom = "Sygnały sprzeczne. Wstrzymaj się z decyzją."
-
-        # Zapisz do pamięci podręcznej (Zamrożenie)
-        st.session_state.ai_data = {
-            'ticker': ticker, 'trend_opis': t_opis, 'rsi_opis': r_opis, 
-            'macd_opis': m_opis, 'sent_opis': s_opis, 'werdykt_status': w_stat, 
-            'werdykt_kolor': w_kolor, 'werdykt_komentarz': w_kom, 
-            'news_items': news_items, 'avg_sent': avg_sent, 
-            'czas': datetime.now().strftime("%H:%M:%S"),
-            'silnik': silnik_info
-        }
-
-# Wyświetlanie aktualnego stanu werdyktu
-if st.session_state.ai_data:
-    d = st.session_state.ai_data
-    komunikat = f"🎯 **WERDYKT AI COPILOTA: {d['werdykt_status']}** (dla {d['ticker']})\n\n- {d['trend_opis']} | {d['rsi_opis']} | {d['macd_opis']} | Sentyment: {d['sent_opis']}\n- *{d['werdykt_komentarz']}*\n*(Ostatnia analiza: {d['czas']} | 🧠 {d['silnik']})*"
-    
-    if d['werdykt_kolor'] == "success":
-        verdict_placeholder.success(komunikat)
-    elif d['werdykt_kolor'] == "error":
-        verdict_placeholder.error(komunikat)
-    else:
-        verdict_placeholder.info(komunikat)
+flagi_tekst = "\n- ".join(jakosc_flags)
+komunikat_werdyktu = f"🎯 **WERDYKT AI COPILOTA: {werdykt_status}**\n\n**Wykryte flagi systemowe:**\n- {flagi_tekst}\n\n*{werdykt_komentarz}*"
+if werdykt_kolor == "success":
+    st.success(komunikat_werdyktu)
+elif werdykt_kolor == "error":
+    st.error(komunikat_werdyktu)
 else:
-    verdict_placeholder.info("🤖 **System gotowy.** Kliknij przycisk poniżej, aby wygenerować świeżą analizę AI FinBERT.")
+    st.info(komunikat_werdyktu)
 
 # --- ZAKŁADKI GŁÓWNE ---
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📈 Wykres", 
-    "🤖 Sentyment", 
-    "⚖️ Kalkulator & ATR",
-    "🔍 Skaner",
-    "📓 Dziennik Transakcji",
-    "📊 Portfel Live (T212)"
+tab1, tab2, tab3, tab4, tab5 = st.tabs([
+    "📈 Wykres (Wstęgi + SMA200 + MACD)", 
+    "🤖 Analiza Sentymentu (AI)", 
+    "⚖️ Kalkulator Pozycji & ATR",
+    "🔍 Skaner Rynku (GPW & USA)",
+    "📓 Dziennik Transakcji"
 ])
 
 with tab1:
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.7, 0.3])
     
     fig.add_trace(go.Candlestick(
-        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'], name="Świece"
+        x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
+        name="Świece"
     ), row=1, col=1)
     
     fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.2), name="SMA 20"), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='deepskyblue', width=1.5), name="SMA 50"), row=1, col=1)
+    if 'SMA200' in df.columns:
+        fig.add_trace(go.Scatter(x=df.index, y=df['SMA200'], line=dict(color='purple', width=2), name="SMA 200"), row=1, col=1)
+        
     fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], line=dict(color='gray', width=1, dash='dot'), name="Górna Wstęga"), row=1, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], line=dict(color='gray', width=1, dash='dot'), name="Dolna Wstęga"), row=1, col=1)
     
@@ -352,32 +284,29 @@ with tab1:
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='cyan', width=1.5), name="MACD"), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='yellow', width=1.2), name="Sygnał MACD"), row=2, col=1)
     
-    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
-    fig.update_layout(title=f"Analiza techniczna: {ticker}", xaxis_rangeslider_visible=False, height=620, template="plotly_dark", margin=dict(l=20, r=20, t=40, b=20))
+    fig.update_layout(
+        title=f"Analiza techniczna: {ticker}",
+        xaxis_rangeslider_visible=False,
+        height=620,
+        template="plotly_dark",
+        margin=dict(l=20, r=20, t=40, b=20)
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 with tab2:
-    st.subheader("📰 Świeże wiadomości rynkowe i Sentyment")
-    if st.session_state.ai_data:
-        d = st.session_state.ai_data
-        st.caption(f"Wyświetlam wyniki zamrożone dla: **{d['ticker']}** (Aktualizacja: {d['czas']}) | 🧠 Silnik: **{d.get('silnik', 'TextBlob')}**")
-        if d['ticker'] != ticker:
-            st.warning(f"⚠️ Uwaga: Poniższe wiadomości dotyczą aktywa **{d['ticker']}**. Jeśli chcesz pobrać newsy dla **{ticker}**, kliknij przycisk 'Odśwież Werdykt' powyżej.")
-        
-        if d['news_items']:
-            for item in d['news_items']:
-                st.markdown(f"**[{item['tytul']}]({item['link']})**")
-                st.caption(f"Sentyment: {item['status']} (`{item['score']:.2f}`) | Źródło: **{item['zrodlo']}** | Opublikowano: **{item['data']}**")
-                st.write("---")
-        else:
-            st.warning("Brak najnowszych wiadomości z ostatnich dni.")
+    st.subheader("📰 Świeże wiadomości rynkowe (Real-Time)")
+    if news_items:
+        for item in news_items:
+            st.markdown(f"**[{item['tytul']}]({item['link']})**")
+            st.caption(f"Sentyment: {item['status']} (`{item['score']:.2f}`) | Źródło: **{item['zrodlo']}** | Opublikowano: **{item['data']}**")
+            st.write("---")
     else:
-        st.info("Kliknij przycisk 'Odśwież Werdykt' w głównym panelu, aby pobrać wiadomości i ocenić sentyment.")
+        st.warning("Brak najnowszych wiadomości dla tego aktywa z ostatnich dni.")
 
 with tab3:
-    st.subheader("⚖️ Inteligentny Kalkulator Pozycji (ATR & Blokada 10%)")
+    st.subheader("⚖️ Inteligentny Kalkulator Pozycji i Ryzyka (Zmienność ATR)")
     
-    mnoznik_atr = st.slider("Mnożnik ATR dla Stop Lossa:", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+    mnoznik_atr = st.slider("Mnożnik ATR dla Stop Lossa (Zalecane: 1.5x - 2.5x):", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
     sugerowany_sl_long = float(round(ostatnia_cena - (ostatni_atr * mnoznik_atr), 2))
     sugerowany_tp_long = float(round(ostatnia_cena + (ostatni_atr * mnoznik_atr * 2.0), 2))
     
@@ -390,27 +319,16 @@ with tab3:
     roznica_sl = abs(ostatnia_cena - stop_loss)
     if roznica_sl > 0:
         max_strata_kwota = kapital * (ryzyko_proc / 100)
-        liczba_z_ryzyka = int(max_strata_kwota / roznica_sl)
-        max_wartosc_kapitalu = kapital * 0.10
-        liczba_z_kapitalu = int(max_wartosc_kapitalu / ostatnia_cena)
-        
-        rekomendowana_liczba = min(liczba_z_ryzyka, liczba_z_kapitalu)
+        rekomendowana_liczba = int(max_strata_kwota / roznica_sl)
         wartosc_pozycji = rekomendowana_liczba * ostatnia_cena
-        faktyczne_ryzyko_kwota = rekomendowana_liczba * roznica_sl
-        faktyczne_ryzyko_proc = (faktyczne_ryzyko_kwota / kapital) * 100
         r_r = abs(take_profit - ostatnia_cena) / roznica_sl
-        
-        komunikat_blokady = ""
-        if rekomendowana_liczba == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka:
-            komunikat_blokady = "\n\n⚠️ *Uwaga: Zadziałała blokada kapitałowa. Zmniejszono pozycję do max. 10% portfela.*"
         
         st.success(
             f"🎯 Parametry zlecenia:\n\n"
-            f"- Zalecana wielkość pozycji: **{rekomendowana_liczba}** sztuk\n"
-            f"- Łączna wartość transakcji: **{wartosc_pozycji:,.2f}** (Limit 10%)\n"
-            f"- Faktyczna strata na SL: **{faktyczne_ryzyko_kwota:,.2f}** ({faktyczne_ryzyko_proc:.2f}%)\n"
-            f"- Stosunek Zysku do Ryzyka: **1 : {r_r:.2f}**\n"
-            f"{komunikat_blokady}"
+            f"- Zalecana wielkość pozycji: **{rekomendowana_liczba}** sztuk / kontraktów\n"
+            f"- Łączna wartość transakcji: **{wartosc_pozycji:,.2f}**\n"
+            f"- Ryzyko kapitałowe (Max strata): **{max_strata_kwota:,.2f}** ({ryzyko_proc}%)\n"
+            f"- Stosunek Zysku do Ryzyka (Risk/Reward): **1 : {r_r:.2f}**"
         )
     else:
         st.warning("Stop Loss nie może być równy bieżącej cenie.")
@@ -427,114 +345,134 @@ with tab4:
                     cena = float(d_skan['Close'].iloc[-1])
                     rsi_val = float(d_skan['RSI'].iloc[-1]) if not pd.isna(d_skan['RSI'].iloc[-1]) else 50.0
                     sma50_val = float(d_skan['SMA50'].iloc[-1]) if not pd.isna(d_skan['SMA50'].iloc[-1]) else cena
+                    atr_val = float(d_skan['ATR'].iloc[-1]) if not pd.isna(d_skan['ATR'].iloc[-1]) else 0.0
                     trend = "🟢 Wzrostowy" if cena > sma50_val else "🔴 Spadkowy"
+                    
+                    if rsi_val < 35:
+                        stan_rsi = "🔥 Wyprzedanie (<35)"
+                    elif rsi_val > 70:
+                        stan_rsi = "⚠️ Wykupienie (>70)"
+                    else:
+                        stan_rsi = "Neutralne"
+                        
                     wyniki_skanera.append({
-                        "Aktywo": nazwa, "Ticker": sym, "Cena": f"{cena:.2f}",
-                        "RSI (14)": f"{rsi_val:.1f}", "Trend (SMA50)": trend
+                        "Aktywo": nazwa,
+                        "Ticker": sym,
+                        "Cena": f"{cena:.2f}",
+                        "RSI (14)": f"{rsi_val:.1f}",
+                        "Stan RSI": stan_rsi,
+                        "ATR": f"{atr_val:.2f}",
+                        "Trend (SMA50)": trend
                     })
-            st.dataframe(pd.DataFrame(wyniki_skanera), use_container_width=True)
+            
+            df_skaner = pd.DataFrame(wyniki_skanera)
+            st.dataframe(df_skaner, use_container_width=True)
 
 with tab5:
-    st.subheader("📓 Dziennik Transakcji (DEV)")
-    with st.form("dziennik_dev_form"):
-        c1, c2, c3 = st.columns(3)
-        t_ak = c1.text_input("Aktywo / Ticker:", value=ticker)
-        t_kir = c2.selectbox("Kierunek:", ["KUPNO (Long)", "SPRZEDAŻ (Short)"])
-        t_wol = c3.number_input("Wolumen:", value=1.0)
+    st.subheader("📓 Dziennik Transakcji (Trading Journal)")
+    
+    with st.expander("⚡ Szybkie wklejanie z XTB (Kopiuj-Wklej)", expanded=True):
+        st.info("Wklej tutaj tekst skopiowany z historii platformy XTB, a system uzupełni dane.")
+        surowy_tekst = st.text_area("Wklej dane transakcji:")
         
-        c4, c5, c6 = st.columns(3)
-        t_cen = c4.number_input("Cena Otwarcia:", value=ostatnia_cena, format="%.4f")
-        t_sta = c5.selectbox("Status:", ["Zamknięte", "Otwarte"])
-        t_pnl = c6.number_input("Wynik netto:", value=0.0, format="%.2f")
-        
-        if st.form_submit_button("Zapisz w dzienniku"):
-            nowy = {
-                "Data": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "Aktywo": t_ak.upper(), "Kierunek": t_kir, "Wolumen": t_wol,
-                "Cena Otwarcia": t_cen, "Status": t_sta, "Wynik": t_pnl
-            }
-            zapisz_w_dzienniku(nowy)
-            st.success("Zapisano!")
-            st.rerun()
+        if st.button("✨ Przetwórz i dodaj automatycznie"):
+            if surowy_tekst:
+                try:
+                    znalezione_liczby = re.findall(r"[-+]?\d*\.\d+|\d+", surowy_tekst)
+                    slowa = surowy_tekst.split()
+                    wyciagniety_symbol = ticker 
+                    for s in slowa:
+                        if s.isupper() and len(s) >= 3 and len(s) <= 8:
+                            wyciagniety_symbol = s
+                            break
+                             
+                    pnl_wykryte = float(znalezione_liczby[-1]) if znalezione_liczby else 0.0
+                    
+                    nowy_wpis = {
+                        "Data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                        "Aktywo": wyciagniety_symbol,
+                        "Kierunek": "KUPNO (Long)",
+                        "Wolumen": 1.0,
+                        "Cena Otwarcia": ostatnia_cena,
+                        "Status": "Zamknięte",
+                        "Wynik (PLN)": pnl_wykryte
+                    }
+                    zapisz_w_dzienniku(nowy_wpis)
+                    st.success(f"✅ Dodano transakcję! PnL: {pnl_wykryte}")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Błąd przetwarzania: {e}")
+            else:
+                st.warning("Wklej najpierw tekst.")
+
+    with st.expander("➕ Dodaj nową transakcję ręcznie", expanded=False):
+        with st.form("nowa_transakcja_form"):
+            c_f1, c_f2, c_f3 = st.columns(3)
+            t_aktywo = c_f1.text_input("Ticker:", value=ticker)
+            t_kierunek = c_f2.selectbox("Kierunek:", ["KUPNO (Long)", "SPRZEDAŻ (Short)"])
+            t_wolumen = c_f3.number_input("Wolumen:", min_value=0.01, value=1.0, step=0.1)
             
-    df_d = wczytaj_dziennik()
-    if not df_d.empty:
-        zamkniete = df_d[df_d['Status'] == 'Zamknięte'].copy()
+            c_f4, c_f5, c_f6 = st.columns(3)
+            t_cena = c_f4.number_input("Cena Otwarcia:", value=ostatnia_cena, format="%.4f")
+            t_status = c_f5.selectbox("Status:", ["Otwarte", "Zamknięte"])
+            t_pnl = c_f6.number_input("Wynik netto:", value=0.0, format="%.2f")
+            
+            submit_trade = st.form_submit_button("Zapisz w dzienniku")
+            
+            if submit_trade:
+                nowy_wpis = {
+                    "Data": datetime.now().strftime("%Y-%m-%d %H:%M"),
+                    "Aktywo": t_aktywo.upper(),
+                    "Kierunek": t_kierunek,
+                    "Wolumen": t_wolumen,
+                    "Cena Otwarcia": t_cena,
+                    "Status": t_status,
+                    "Wynik (PLN)": t_pnl
+                }
+                zapisz_w_dzienniku(nowy_wpis)
+                st.success("✅ Dodano do dziennika!")
+                st.rerun()
+                
+    st.markdown("---")
+    st.markdown("### 📊 Statystyki i Krzywa Kapitału")
+    df_dziennik = wczytaj_dziennik()
+    
+    if not df_dziennik.empty:
+        zamkniete = df_dziennik[df_dziennik['Status'] == 'Zamknięte'].copy()
+        
         if not zamkniete.empty:
-            zamkniete['Wynik'] = pd.to_numeric(zamkniete['Wynik'], errors='coerce').fillna(0)
+            zamkniete['Wynik (PLN)'] = pd.to_numeric(zamkniete['Wynik (PLN)'], errors='coerce')
+            
             total_trades = len(zamkniete)
-            zyskownych = len(zamkniete[zamkniete['Wynik'] > 0])
-            stratnych = len(zamkniete[zamkniete['Wynik'] <= 0])
+            zyskownych = len(zamkniete[zamkniete['Wynik (PLN)'] > 0])
+            stratnych = len(zamkniete[zamkniete['Wynik (PLN)'] <= 0])
             win_rate = (zyskownych / total_trades) * 100 if total_trades > 0 else 0
-            suma_wynikow = zamkniete['Wynik'].sum()
+            suma_wynikow = zamkniete['Wynik (PLN)'].sum()
             
             c_s1, c_s2, c_s3, c_s4 = st.columns(4)
-            c_s1.metric("Zam. pozycje", total_trades)
-            c_s2.metric("Skuteczność", f"{win_rate:.1f}%")
+            c_s1.metric("Zamknięte pozycje", total_trades)
+            c_s2.metric("Skuteczność (Win Rate)", f"{win_rate:.1f}%")
             c_s3.metric("Zysk / Strata", f"{zyskownych} / {stratnych}")
-            c_s4.metric("Wynik (PnL)", f"{suma_wynikow:.2f}")
+            c_s4.metric("Całkowity Wynik (PnL)", f"{suma_wynikow:.2f} PLN")
             
-            zamkniete['Krzywa'] = zamkniete['Wynik'].cumsum()
-            fig_eq = go.Figure(go.Scatter(x=zamkniete['Data'], y=zamkniete['Krzywa'], mode='lines+markers', line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)))
-            fig_eq.update_layout(title="Krzywa Zysków i Strat", template="plotly_dark", height=350)
+            zamkniete['Krzywa Kapitału'] = zamkniete['Wynik (PLN)'].cumsum()
+            fig_eq = go.Figure()
+            fig_eq.add_trace(go.Scatter(
+                x=zamkniete['Data'], 
+                y=zamkniete['Krzywa Kapitału'], 
+                mode='lines+markers', 
+                name='Krzywa PnL', 
+                line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)
+            ))
+            fig_eq.update_layout(
+                title="Krzywa Zysków i Strat", 
+                template="plotly_dark", 
+                height=350,
+                margin=dict(l=20, r=20, t=40, b=20)
+            )
             st.plotly_chart(fig_eq, use_container_width=True)
             
         st.markdown("### 📝 Pełna historia operacji")
-        st.dataframe(df_d, use_container_width=True)
-
-with tab6:
-    st.subheader("📊 Mój Portfel Live (Trading 212 Demo)")
-    if not T212_KEY or not T212_SEC:
-        st.warning("⚠️ Brak kluczy API w Streamlit Secrets!")
+        st.dataframe(df_dziennik, use_container_width=True)
     else:
-        if st.button("🔄 Odśwież dane portfela z T212"):
-            st.cache_data.clear()
-            
-        @st.cache_data(ttl=30)
-        def pobierz_portfel_t212(k, s):
-            try:
-                c = requests.get(f"{T212_BASE_URL}/account/cash", auth=(k, s))
-                p = requests.get(f"{T212_BASE_URL}/positions", auth=(k, s))
-                if c.status_code == 200 and p.status_code == 200:
-                    return c.json(), p.json()
-            except:
-                pass
-            return None, None
-            
-        kasa, pozycje = pobierz_portfel_t212(T212_KEY, T212_SEC)
-        
-        if kasa is not None:
-            col1, col2, col3, col4 = st.columns(4)
-            col1.metric("Wycena Portfela", f"{kasa.get('total', 0):.2f}")
-            col2.metric("Wolne Środki", f"{kasa.get('free', 0):.2f}")
-            col3.metric("Zainwestowane", f"{kasa.get('invested', 0):.2f}")
-            col4.metric("Wynik (PnL)", f"{kasa.get('ppl', 0):.2f}")
-            
-            if pozycje and isinstance(pozycje, list) and len(pozycje) > 0:
-                lista = []
-                for p in pozycje:
-                    instr = p.get('instrument', {})
-                    tckr_raw = instr.get('ticker', 'N/A')
-                    nazwa_raw = instr.get('name', '')
-                    wyswietlany_ticker = f"{nazwa_raw} ({tckr_raw})" if nazwa_raw else tckr_raw
-                    
-                    qty = float(p.get('quantity', 0.0))
-                    cur_p = float(p.get('currentPrice', 0.0))
-                    avg_p = float(p.get('averagePricePaid', 0.0))
-                    
-                    wallet = p.get('walletImpact', {})
-                    ppl = float(wallet.get('unrealizedProfitLoss', 0.0))
-                    
-                    lista.append({
-                        "Aktywo (Ticker)": wyswietlany_ticker,
-                        "Kierunek": "LONG" if qty > 0 else "SHORT",
-                        "Wolumen": abs(qty),
-                        "Śr. Cena Wejścia": round(avg_p, 4),
-                        "Obecna Cena": round(cur_p, 4),
-                        "Zysk / Strata": round(ppl, 2)
-                    })
-                st.dataframe(pd.DataFrame(lista), use_container_width=True)
-            else:
-                st.info("Brak otwartych pozycji na platformie Trading 212.")
-        else:
-            st.error("Błąd połączenia. Sprawdź klucze API.")
+        st.info("Twój dziennik jest pusty.")
