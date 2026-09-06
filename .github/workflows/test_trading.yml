@@ -1,7 +1,11 @@
 name: Dev Sandbox - Trading 212 Demo
 
 on:
-  workflow_dispatch: # Pozwala na uruchomienie testu "z palca" w zakładce Actions w dowolnym momencie
+  workflow_dispatch: # Zostawiamy tę opcję, żebyś wciąż mógł klikać ręcznie, gdy masz ochotę
+  schedule:
+    # 13:45 UTC to 15:45 czasu polskiego letniego. 
+    # Cyfry "1-5" oznaczają dni robocze (Poniedziałek - Piątek).
+    - cron: '45 13 * * 1-5'
 
 jobs:
   test-trade:
@@ -14,6 +18,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+
       - name: Instalacja bibliotek
         run: |
           pip install requests pandas numpy yfinance feedparser textblob
@@ -22,4 +27,7 @@ jobs:
         env:
           T212_API_KEY: ${{ secrets.T212_API_KEY }}
           T212_API_SECRET: ${{ secrets.T212_API_SECRET }}
+          HF_API_TOKEN: ${{ secrets.HF_API_TOKEN }}
+          TG_TOKEN_DEV: ${{ secrets.TG_TOKEN_DEV }}
+          TG_CHAT_ID: ${{ secrets.TG_CHAT_ID }}
         run: python bot_trading_demo.py
