@@ -7,17 +7,103 @@ import numpy as np
 import feedparser
 from textblob import TextBlob
 from datetime import datetime
-import os
-import re
+import sqlite3
 
 # Poprawny import modułu z podfolderu modules
 from modules import indicators
 
-# Konfiguracja strony
+# --- KONFIGURACJA BAZY DANYCH (WSPÓLNA DLA BOTA TRADING212) ---
+DB_NAME = "trading_history.db"
+
+def inicjalizuj_baze():
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+    cursor.execute('''
+        CREATE TABLE IF NOT EXISTS transakcje (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ticker TEXT,
+            nazwa TEXT,
+            quantity INTEGER,
+            entry_price REAL,
+            sl REAL,
+            tp REAL,
+            entry_date TEXT,
+            status TEXT,
+            exit_price REAL,
+            pnl REAL
+        )
+    ''')
+    conn.commit()
+    conn.close()
+
+def pobierz_dziennik_z_bazy():
+    """
+    Pobiera pełny dziennik transakcji z SQLite (transakcje bota + wpisy ręczne).
+    """
+    inicjalizuj_baze()
+    conn = sqlite3.connect(DB_NAME)
+    df = pd.read_sql_query(
+        "SELECT id, ticker, nazwa, quantity, entry_price, sl, tp, entry_date, status, exit_price, pnl "
+        "FROM transakcje ORDER BY entry_date",
+        conn
+    )
+    conn.close()
+    return df
+
+def dodaj_transakcje_reczna(
+    ticker: str,
+    nazwa: str,
+    quantity: float,
+    entry_price: float,
+    status: str,
+    exit_price: float | None,
+    pnl: float | None
+):
+    """
+    Dodaje ręcznie wprowadzoną transakcję do tej samej bazy SQLite, co bot Trading212.
+    """
+    inicjalizuj_baze()
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    entry_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    # Mapowanie statusu z UI na wartości w bazie
+    if status == "Otwarte":
+        status_db = "OPEN"
+        pnl_db = 0.0 if pnl is None else float(pnl)
+        exit_price_db = None
+    else:
+        status_db = "CLOSED"
+        pnl_db = 0.0 if pnl is None else float(pnl)
+        exit_price_db = None if exit_price is None else float(exit_price)
+
+    cursor.execute('''
+        INSERT INTO transakcje (
+            ticker, nazwa, quantity, entry_price, sl, tp,
+            entry_date, status, exit_price, pnl
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (
+        ticker.upper(),
+        nazwa,
+        quantity,
+        entry_price,
+        0.0,          # SL ręczny (opcjonalnie możesz później dodać do form)
+        0.0,          # TP ręczny
+        entry_date,
+        status_db,
+        exit_price_db,
+        pnl_db
+    ))
+    conn.commit()
+    conn.close()
+
+# --- KONFIGURACJA STRONY STREAMLIT ---
 st.set_page_config(page_title="AI Trading Copilot Pro", layout="wide", page_icon="📈")
 
 st.title("🤖 AI Trading & Investment Copilot")
-st.caption("Wsparcie decyzji inwestycyjnych: Wall Street, GPW, Surowce, CFD (XTB)")
+st.caption("Wsparcie decyzji inwestycyjnych: Wall Street, GPW, Surowce, ETF (Trading212)")
 
 # Predefiniowana baza aktywów
 popularne_aktywa = {
@@ -35,28 +121,18 @@ popularne_aktywa = {
     "Dino Polska (DNP.WA)": {"ticker": "DNP.WA", "search_term": "Dino Polska gielda GPW"}
 }
 
-# --- FUNKCJE DZIENNIKA TRANSAKCJI ---
-PLIK_DZIENNIKA = "dziennik_transakcji.csv"
-
-def wczytaj_dziennik():
-    if os.path.exists(PLIK_DZIENNIKA):
-        try:
-            return pd.read_csv(PLIK_DZIENNIKA)
-        except:
-            pass
-    return pd.DataFrame(columns=["Data", "Aktywo", "Kierunek", "Wolumen", "Cena Otwarcia", "Status", "Wynik (PLN)"])
-
-def zapisz_w_dzienniku(nowy_wpis):
-    df = wczytaj_dziennik()
-    df = pd.concat([df, pd.DataFrame([nowy_wpis])], ignore_index=True)
-    df.to_csv(PLIK_DZIENNIKA, index=False)
-
 # --- PANEL BOCZNY (Sidebar) ---
 st.sidebar.header("⚙️ Ustawienia analizy")
-wybor_predefiniowany = st.sidebar.selectbox("Wybierz z listy:", ["Wpisz własny..."] + list(popularne_aktywa.keys()))
+wybor_predefiniowany = st.sidebar.selectbox(
+    "Wybierz z listy:",
+    ["Wpisz własny..."] + list(popularne_aktywa.keys())
+)
 
 if wybor_predefiniowany == "Wpisz własny...":
-    ticker = st.sidebar.text_input("Wpisz Ticker (np. TSLA, KGH.WA, GC=F):", value="GC=F").upper()
+    ticker = st.sidebar.text_input(
+        "Wpisz Ticker (np. TSLA, KGH.WA, GC=F):",
+        value="GC=F"
+    ).upper()
     search_query = ticker.replace(".WA", "") + " stock market news"
 else:
     ticker = popularne_aktywa[wybor_predefiniowany]["ticker"]
@@ -67,9 +143,20 @@ okres = st.sidebar.selectbox("Zakres czasu:", ["1mo", "3mo", "6mo", "1y", "2y"],
 interwal = st.sidebar.selectbox("Interwał:", ["1d", "1wk"], index=0)
 
 st.sidebar.markdown("---")
-st.sidebar.header("⚖️ Kalkulator Wielkości Pozycji (XTB)")
-kapital = st.sidebar.number_input("Twój kapitał (PLN / USD):", min_value=100.0, value=10000.0, step=500.0)
-ryzyko_proc = st.sidebar.slider("Dopuszczalne ryzyko transakcji (%):", min_value=0.5, max_value=5.0, value=1.5, step=0.5)
+st.sidebar.header("⚖️ Kalkulator Wielkości Pozycji")
+kapital = st.sidebar.number_input(
+    "Twój kapitał (PLN / USD):",
+    min_value=100.0,
+    value=10000.0,
+    step=500.0
+)
+ryzyko_proc = st.sidebar.slider(
+    "Dopuszczalne ryzyko transakcji (%):",
+    min_value=0.5,
+    max_value=5.0,
+    value=1.5,
+    step=0.5
+)
 
 # --- FUNKCJE DANYCH I ZAAWANSOWANYCH WSKAŹNIKÓW Z MODUŁU ---
 @st.cache_data(ttl=180)
@@ -246,7 +333,11 @@ c4.metric("RSI (14)", f"{ostatni_rsi:.1f}", rsi_opis)
 c5.metric("Zmienność ATR (14)", f"{ostatni_atr:.2f}", "Średni zasięg świecy")
 
 flagi_tekst = "\n- ".join(jakosc_flags)
-komunikat_werdyktu = f"🎯 **WERDYKT AI COPILOTA: {werdykt_status}**\n\n**Wykryte flagi systemowe:**\n- {flagi_tekst}\n\n*{werdykt_komentarz}*"
+komunikat_werdyktu = (
+    f"🎯 **WERDYKT AI COPILOTA: {werdykt_status}**\n\n"
+    f"**Wykryte flagi systemowe:**\n- {flagi_tekst}\n\n"
+    f"*{werdykt_komentarz}*"
+)
 if werdykt_kolor == "success":
     st.success(komunikat_werdyktu)
 elif werdykt_kolor == "error":
@@ -260,29 +351,65 @@ tab1, tab2, tab3, tab4, tab5 = st.tabs([
     "🤖 Analiza Sentymentu (AI)", 
     "⚖️ Kalkulator Pozycji & ATR",
     "🔍 Skaner Rynku (GPW & USA)",
-    "📓 Dziennik Transakcji"
+    "📓 Dziennik Transakcji (SQLite)"
 ])
 
 with tab1:
-    fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.04, row_heights=[0.7, 0.3])
+    fig = make_subplots(
+        rows=2, cols=1,
+        shared_xaxes=True,
+        vertical_spacing=0.04,
+        row_heights=[0.7, 0.3]
+    )
     
     fig.add_trace(go.Candlestick(
         x=df.index, open=df['Open'], high=df['High'], low=df['Low'], close=df['Close'],
         name="Świece"
     ), row=1, col=1)
     
-    fig.add_trace(go.Scatter(x=df.index, y=df['SMA20'], line=dict(color='orange', width=1.2), name="SMA 20"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['SMA50'], line=dict(color='deepskyblue', width=1.5), name="SMA 50"), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['SMA20'],
+        line=dict(color='orange', width=1.2),
+        name="SMA 20"
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['SMA50'],
+        line=dict(color='deepskyblue', width=1.5),
+        name="SMA 50"
+    ), row=1, col=1)
     if 'SMA200' in df.columns:
-        fig.add_trace(go.Scatter(x=df.index, y=df['SMA200'], line=dict(color='purple', width=2), name="SMA 200"), row=1, col=1)
+        fig.add_trace(go.Scatter(
+            x=df.index, y=df['SMA200'],
+            line=dict(color='purple', width=2),
+            name="SMA 200"
+        ), row=1, col=1)
         
-    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Upper'], line=dict(color='gray', width=1, dash='dot'), name="Górna Wstęga"), row=1, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['BB_Lower'], line=dict(color='gray', width=1, dash='dot'), name="Dolna Wstęga"), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['BB_Upper'],
+        line=dict(color='gray', width=1, dash='dot'),
+        name="Górna Wstęga"
+    ), row=1, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['BB_Lower'],
+        line=dict(color='gray', width=1, dash='dot'),
+        name="Dolna Wstęga"
+    ), row=1, col=1)
     
     colors_hist = ['green' if val >= 0 else 'red' for val in df['MACD_Hist']]
-    fig.add_trace(go.Bar(x=df.index, y=df['MACD_Hist'], name="MACD Hist", marker_color=colors_hist), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MACD'], line=dict(color='cyan', width=1.5), name="MACD"), row=2, col=1)
-    fig.add_trace(go.Scatter(x=df.index, y=df['MACD_Signal'], line=dict(color='yellow', width=1.2), name="Sygnał MACD"), row=2, col=1)
+    fig.add_trace(go.Bar(
+        x=df.index, y=df['MACD_Hist'],
+        name="MACD Hist", marker_color=colors_hist
+    ), row=2, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['MACD'],
+        line=dict(color='cyan', width=1.5),
+        name="MACD"
+    ), row=2, col=1)
+    fig.add_trace(go.Scatter(
+        x=df.index, y=df['MACD_Signal'],
+        line=dict(color='yellow', width=1.2),
+        name="Sygnał MACD"
+    ), row=2, col=1)
     
     fig.update_layout(
         title=f"Analiza techniczna: {ticker}",
@@ -298,7 +425,10 @@ with tab2:
     if news_items:
         for item in news_items:
             st.markdown(f"**[{item['tytul']}]({item['link']})**")
-            st.caption(f"Sentyment: {item['status']} (`{item['score']:.2f}`) | Źródło: **{item['zrodlo']}** | Opublikowano: **{item['data']}**")
+            st.caption(
+                f"Sentyment: {item['status']} (`{item['score']:.2f}`) | "
+                f"Źródło: **{item['zrodlo']}** | Opublikowano: **{item['data']}**"
+            )
             st.write("---")
     else:
         st.warning("Brak najnowszych wiadomości dla tego aktywa z ostatnich dni.")
@@ -306,7 +436,11 @@ with tab2:
 with tab3:
     st.subheader("⚖️ Inteligentny Kalkulator Pozycji i Ryzyka (Zmienność ATR)")
     
-    mnoznik_atr = st.slider("Mnożnik ATR dla Stop Lossa (Zalecane: 1.5x - 2.5x):", min_value=1.0, max_value=4.0, value=2.0, step=0.5)
+    mnoznik_atr = st.slider(
+        "Mnożnik ATR dla Stop Lossa (Zalecane: 1.5x - 2.5x):",
+        min_value=1.0, max_value=4.0,
+        value=2.0, step=0.5
+    )
     sugerowany_sl_long = float(round(ostatnia_cena - (ostatni_atr * mnoznik_atr), 2))
     sugerowany_tp_long = float(round(ostatnia_cena + (ostatni_atr * mnoznik_atr * 2.0), 2))
     
@@ -369,85 +503,58 @@ with tab4:
             st.dataframe(df_skaner, use_container_width=True)
 
 with tab5:
-    st.subheader("📓 Dziennik Transakcji (Trading Journal)")
-    
-    with st.expander("⚡ Szybkie wklejanie z XTB (Kopiuj-Wklej)", expanded=True):
-        st.info("Wklej tutaj tekst skopiowany z historii platformy XTB, a system uzupełni dane.")
-        surowy_tekst = st.text_area("Wklej dane transakcji:")
-        
-        if st.button("✨ Przetwórz i dodaj automatycznie"):
-            if surowy_tekst:
-                try:
-                    znalezione_liczby = re.findall(r"[-+]?\d*\.\d+|\d+", surowy_tekst)
-                    slowa = surowy_tekst.split()
-                    wyciagniety_symbol = ticker 
-                    for s in slowa:
-                        if s.isupper() and len(s) >= 3 and len(s) <= 8:
-                            wyciagniety_symbol = s
-                            break
-                             
-                    pnl_wykryte = float(znalezione_liczby[-1]) if znalezione_liczby else 0.0
-                    
-                    nowy_wpis = {
-                        "Data": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                        "Aktywo": wyciagniety_symbol,
-                        "Kierunek": "KUPNO (Long)",
-                        "Wolumen": 1.0,
-                        "Cena Otwarcia": ostatnia_cena,
-                        "Status": "Zamknięte",
-                        "Wynik (PLN)": pnl_wykryte
-                    }
-                    zapisz_w_dzienniku(nowy_wpis)
-                    st.success(f"✅ Dodano transakcję! PnL: {pnl_wykryte}")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Błąd przetwarzania: {e}")
-            else:
-                st.warning("Wklej najpierw tekst.")
+    st.subheader("📓 Dziennik Transakcji (Wspólna baza SQLite)")
 
-    with st.expander("➕ Dodaj nową transakcję ręcznie", expanded=False):
+    st.markdown(
+        "Ten dziennik korzysta z tej samej bazy `trading_history.db`, której używa bot "
+        "Trading212 – tutaj widzisz jednocześnie transakcje automatyczne i ręczne."
+    )
+
+    with st.expander("➕ Dodaj nową transakcję ręcznie do SQLite", expanded=False):
         with st.form("nowa_transakcja_form"):
             c_f1, c_f2, c_f3 = st.columns(3)
-            t_aktywo = c_f1.text_input("Ticker:", value=ticker)
-            t_kierunek = c_f2.selectbox("Kierunek:", ["KUPNO (Long)", "SPRZEDAŻ (Short)"])
+            t_aktywo = c_f1.text_input("Ticker (np. TSLA, CDR.WA):", value=ticker)
+            t_nazwa = c_f2.text_input("Nazwa aktywa (opis):", value=wybor_predefiniowany if wybor_predefiniowany != "Wpisz własny..." else t_aktywo)
             t_wolumen = c_f3.number_input("Wolumen:", min_value=0.01, value=1.0, step=0.1)
             
             c_f4, c_f5, c_f6 = st.columns(3)
             t_cena = c_f4.number_input("Cena Otwarcia:", value=ostatnia_cena, format="%.4f")
             t_status = c_f5.selectbox("Status:", ["Otwarte", "Zamknięte"])
-            t_pnl = c_f6.number_input("Wynik netto:", value=0.0, format="%.2f")
+            t_pnl = c_f6.number_input("Wynik netto (PLN, dla Zamkniętej):", value=0.0, format="%.2f")
             
-            submit_trade = st.form_submit_button("Zapisz w dzienniku")
+            submit_trade = st.form_submit_button("Zapisz w bazie SQLite")
             
             if submit_trade:
-                nowy_wpis = {
-                    "Data": datetime.now().strftime("%Y-%m-%d %H:%M"),
-                    "Aktywo": t_aktywo.upper(),
-                    "Kierunek": t_kierunek,
-                    "Wolumen": t_wolumen,
-                    "Cena Otwarcia": t_cena,
-                    "Status": t_status,
-                    "Wynik (PLN)": t_pnl
-                }
-                zapisz_w_dzienniku(nowy_wpis)
-                st.success("✅ Dodano do dziennika!")
-                st.rerun()
+                try:
+                    dodaj_transakcje_reczna(
+                        ticker=t_aktywo,
+                        nazwa=t_nazwa,
+                        quantity=t_wolumen,
+                        entry_price=t_cena,
+                        status=t_status,
+                        exit_price=None,
+                        pnl=t_pnl
+                    )
+                    st.success("✅ Dodano transakcję do bazy SQLite!")
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Błąd zapisu do bazy SQLite: {e}")
                 
     st.markdown("---")
-    st.markdown("### 📊 Statystyki i Krzywa Kapitału")
-    df_dziennik = wczytaj_dziennik()
+    st.markdown("### 📊 Statystyki i Krzywa Kapitału (z bazy SQLite)")
+    df_dziennik = pobierz_dziennik_z_bazy()
     
     if not df_dziennik.empty:
-        zamkniete = df_dziennik[df_dziennik['Status'] == 'Zamknięte'].copy()
+        zamkniete = df_dziennik[df_dziennik['status'] == 'CLOSED'].copy()
         
         if not zamkniete.empty:
-            zamkniete['Wynik (PLN)'] = pd.to_numeric(zamkniete['Wynik (PLN)'], errors='coerce')
+            zamkniete['pnl'] = pd.to_numeric(zamkniete['pnl'], errors='coerce')
             
             total_trades = len(zamkniete)
-            zyskownych = len(zamkniete[zamkniete['Wynik (PLN)'] > 0])
-            stratnych = len(zamkniete[zamkniete['Wynik (PLN)'] <= 0])
+            zyskownych = len(zamkniete[zamkniete['pnl'] > 0])
+            stratnych = len(zamkniete[zamkniete['pnl'] <= 0])
             win_rate = (zyskownych / total_trades) * 100 if total_trades > 0 else 0
-            suma_wynikow = zamkniete['Wynik (PLN)'].sum()
+            suma_wynikow = zamkniete['pnl'].sum()
             
             c_s1, c_s2, c_s3, c_s4 = st.columns(4)
             c_s1.metric("Zamknięte pozycje", total_trades)
@@ -455,24 +562,24 @@ with tab5:
             c_s3.metric("Zysk / Strata", f"{zyskownych} / {stratnych}")
             c_s4.metric("Całkowity Wynik (PnL)", f"{suma_wynikow:.2f} PLN")
             
-            zamkniete['Krzywa Kapitału'] = zamkniete['Wynik (PLN)'].cumsum()
+            zamkniete['Krzywa Kapitału'] = zamkniete['pnl'].cumsum()
             fig_eq = go.Figure()
             fig_eq.add_trace(go.Scatter(
-                x=zamkniete['Data'], 
-                y=zamkniete['Krzywa Kapitału'], 
-                mode='lines+markers', 
-                name='Krzywa PnL', 
+                x=zamkniete['entry_date'],
+                y=zamkniete['Krzywa Kapitału'],
+                mode='lines+markers',
+                name='Krzywa PnL',
                 line=dict(color='lime' if suma_wynikow >= 0 else 'red', width=3)
             ))
             fig_eq.update_layout(
-                title="Krzywa Zysków i Strat", 
+                title="Krzywa Zysków i Strat (SQLite)", 
                 template="plotly_dark", 
                 height=350,
                 margin=dict(l=20, r=20, t=40, b=20)
             )
             st.plotly_chart(fig_eq, use_container_width=True)
             
-        st.markdown("### 📝 Pełna historia operacji")
+        st.markdown("### 📝 Pełna historia operacji (z bazy SQLite)")
         st.dataframe(df_dziennik, use_container_width=True)
     else:
-        st.info("Twój dziennik jest pusty.")
+        st.info("Baza `transakcje` jest obecnie pusta – brak danych do wyświetlenia.")
