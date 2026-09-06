@@ -196,7 +196,11 @@ def otwórz_pozycje_demo(ticker, quantity, sl_price, tp_price):
 
 def analizuj_szeroki_rynek():
     df = yf.download("SPY", period="3mo", interval="1d", progress=False)
-    if df is None or df.empty: return True, 0.0, 0.0
+    # Zabezpieczenie (Fail-safe): Zwraca False jeśli nie udało się pobrać danych
+    if df is None or df.empty: 
+        print("⚠️ Krytyczny błąd: Nie udało się pobrać danych dla SPY! Blokuję nowe wejścia (Fail-safe).")
+        return False, 0.0, 0.0
+    
     if isinstance(df.columns, pd.MultiIndex): df.columns = df.columns.get_level_values(0)
     df['SMA50'] = df['Close'].rolling(window=50).mean()
     ostatnia_cena = float(df['Close'].iloc[-1])
@@ -246,13 +250,14 @@ def analizuj_aktywo(nazwa, symbol_yf, query):
 
     clean_q = query.replace(" ", "+")
     
+    # Skrócone okno wiadomości (z 7d na 3d) dla szybszej reakcji
     if symbol_yf.endswith(".WA") or "VWCE" in symbol_yf:
-        rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=pl&gl=PL&ceid=PL:pl"
+        rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:3d&hl=pl&gl=PL&ceid=PL:pl"
         feed = feedparser.parse(rss_url)
         tytuly_newsow = [entry.title for entry in feed.entries[:5]] if feed.entries else []
         avg_sent, silnik = analizuj_sentyment_pl(tytuly_newsow, HF_TOKEN)
     else:
-        rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:7d&hl=en-US&gl=US&ceid=US:en"
+        rss_url = f"https://news.google.com/rss/search?q={clean_q}+when:3d&hl=en-US&gl=US&ceid=US:en"
         feed = feedparser.parse(rss_url)
         tytuly_newsow = [entry.title for entry in feed.entries[:5]] if feed.entries else []
         sentymenty_wartosci, silnik = analizuj_sentyment_finbert(tytuly_newsow, HF_TOKEN)
@@ -347,7 +352,8 @@ def uruchom_automatyzacje():
             roznica_sl_usd = atr_usd * 2.0
             liczba_z_ryzyka = int(ryzyko_max_usd / roznica_sl_usd) if roznica_sl_usd > 0 else 0
             
-            max_kapital_na_pozycje_pln = total_capital * 0.10
+            # Zmiana z 10% na 5% maksymalnego kapitału na pozycję
+            max_kapital_na_pozycje_pln = total_capital * 0.05
             max_kapital_na_pozycje_usd = max_kapital_na_pozycje_pln / kurs_usd_pln
             liczba_z_kapitalu = int(max_kapital_na_pozycje_usd / cena_usd) if cena_usd > 0 else 0
             
@@ -364,8 +370,10 @@ def uruchom_automatyzacje():
             sukces, wynik = otwórz_pozycje_demo(info["t212"], wolumen, poziom_sl, poziom_tp)
             
             if sukces:
-                print(f"🚀 SUKCES: {nazwa} - Wysłano zlecenie!")
-                notatka_blokady = " (⚠️ Zmniejszono do 10% kapitału)" if (wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka) else ""
+                # Zabezpieczenie kapitału przed otwieraniem zbyt wielu pozycji bez weryfikacji środków
+                free_cash -= szacowany_koszt_pln
+                print(f"🚀 SUKCES: {nazwa} - Wysłano zlecenie! Zaktualizowano dostępne środki: {free_cash:.2f} PLN")
+                notatka_blokady = " (⚠️ Zmniejszono do 5% kapitału)" if (wolumen == liczba_z_kapitalu and liczba_z_kapitalu < liczba_z_ryzyka) else ""
                 
                 raport_otwarte_pozycje += (
                     f"✅ *{nazwa}* — `{wolumen}` szt. {notatka_blokady}\n"
