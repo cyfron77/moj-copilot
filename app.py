@@ -144,9 +144,9 @@ def policz_sharpe_z_pnl(pnls: pd.Series) -> float:
 
 
 # --- PROSTE FUNKCJE BACKTESTU (SMA/RSI/MACD) ---
-def download_data(symbol: str, period: str = "2y", interval: str = "1d") -> pd.DataFrame:
+def download_data(symbol: str, period: str = "5y", interval: str = "1d") -> pd.DataFrame:
     """
-    Dane z yfinance + wskaźniki z modules.indicators.[web:102][web:103]
+    Dane z yfinance (domyślnie 5 lat, D1) + wskaźniki z modules.indicators.[web:102][web:103]
     """
     df = yf.download(symbol, period=period, interval=interval, progress=False)
     if df is None or df.empty:
@@ -181,6 +181,10 @@ def run_backtest(
       - wejście LONG gdy: Close > SMA50, RSI < 35, MACD > MACD_Signal,
       - SL/TP oparte na ATR,
       - wyjście przy SL/TP lub przy odwróceniu sygnału.
+
+    Debug:
+      - entry_signals: ile razy warunek wejścia (punkty_bycze >= 3) był spełniony,
+      - entries_opened: ile realnie otwarto pozycji.[web:103]
     """
     equity = start_cash
     cash = start_cash
@@ -192,6 +196,9 @@ def run_backtest(
 
     equity_curve = []
     trades = []
+
+    entry_signals = 0  # ile razy warunek wejścia był spełniony
+    entries_opened = 0  # ile razy faktycznie otworzyliśmy pozycję
 
     for idx, row in df.iterrows():
         close = float(row["Close"])
@@ -254,6 +261,8 @@ def run_backtest(
                 punkty_bycze += 1
 
             if punkty_bycze >= 3:
+                entry_signals += 1  # warunek wejścia spełniony (debug)
+
                 sl = close - atr * atr_mult
                 tp = close + atr * atr_mult * 2.0
                 if sl >= close:
@@ -277,6 +286,7 @@ def run_backtest(
 
                 cash -= koszt_pozycji
                 equity = cash + position_qty * close
+                entries_opened += 1  # faktycznie otwarta pozycja
 
     # zamknięcie pozycji na końcu danych
     if position_qty > 0 and entry_price is not None:
@@ -328,6 +338,8 @@ def run_backtest(
         "win_rate": float(win_rate),
         "sharpe": float(sharpe),
         "max_drawdown_pct": max_dd * 100.0,
+        "entry_signals": int(entry_signals),
+        "entries_opened": int(entries_opened),
         "trades_df": trades_df,
         "equity_df": equity_df,
     }
@@ -373,7 +385,7 @@ else:
     ticker = popularne_aktywa[wybor_predefiniowany]["ticker"]
     search_query = popularne_aktywa[wybor_predefiniowany]["search_term"]
 
-okres = st.sidebar.selectbox("Zakres czasu:", ["1mo", "3mo", "6mo", "1y", "2y"], index=4)
+okres = st.sidebar.selectbox("Zakres czasu:", ["1mo", "3mo", "6mo", "1y", "2y", "5y"], index=5)
 interwal = st.sidebar.selectbox("Interwał:", ["1d", "1wk"], index=0)
 
 st.sidebar.markdown("---")
@@ -938,9 +950,9 @@ with tab6:
     st.subheader("🔁 Backtest strategii SMA/RSI/MACD dla wszystkich popularnych aktywów")
 
     st.info(
-        "Po kliknięciu przycisku system pobierze dane z yfinance dla wszystkich aktywów "
+        "Po kliknięciu przycisku system pobierze dane z yfinance (5 lat, D1) dla wszystkich aktywów "
         "w liście popularne_aktywa, uruchomi prosty backtest strategii SMA/RSI/MACD "
-        "i pokaże zbiorcze wyniki."
+        "i pokaże zbiorcze wyniki oraz liczbę sygnałów wejścia."
     )
 
     if st.button("🚀 Uruchom backtest dla wszystkich walorów", type="primary"):
@@ -950,7 +962,7 @@ with tab6:
                 symbol = dane_aktyw["ticker"]
                 st.write(f"➡️ Backtest dla: {nazwa} ({symbol})...")
                 try:
-                    df_bt = download_data(symbol, period="2y", interval="1d")
+                    df_bt = download_data(symbol, period="5y", interval="1d")
                     res = run_backtest(df_bt)
 
                     wyniki.append(
@@ -963,6 +975,8 @@ with tab6:
                             "WinRate%": res["win_rate"],
                             "Sharpe": res["sharpe"],
                             "MaxDrawdown%": res["max_drawdown_pct"],
+                            "EntrySignals": res["entry_signals"],
+                            "EntriesOpened": res["entries_opened"],
                         }
                     )
                 except Exception as e:
@@ -976,18 +990,20 @@ with tab6:
                             "WinRate%": None,
                             "Sharpe": None,
                             "MaxDrawdown%": None,
+                            "EntrySignals": None,
+                            "EntriesOpened": None,
                             "Error": str(e),
                         }
                     )
 
         df_wyniki = pd.DataFrame(wyniki)
-        st.markdown("### 📊 Zbiorcze wyniki backtestu")
+        st.markdown("### 📊 Zbiorcze wyniki backtestu (z debugiem)")
         st.dataframe(df_wyniki, use_container_width=True)
 
         csv_data = df_wyniki.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="📥 Pobierz wyniki jako CSV",
             data=csv_data,
-            file_name="backtest_all_symbols.csv",
+            file_name="backtest_all_symbols_debug.csv",
             mime="text/csv",
         )
