@@ -509,4 +509,4 @@ elif punkty_niedzwiedzie >= 4:
 else:
     werdykt_status = "NEUTRALNY / OBSERWACJA"
     werdykt_kolor = "info"
-    werdykt_komentarz = "Sy
+    werdykt_komentarz = "Rynek w konsolidacji lub sygnały są sprzeczne. Wstrzymaj się."
