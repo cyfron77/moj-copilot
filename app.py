@@ -559,7 +559,57 @@ with tab5:
                     st.rerun()
                 except Exception as e:
                     st.error(f"Błąd zapisu do bazy SQLite: {e}")
-                
+with tab6:
+    st.subheader("🔁 Backtest strategii SMA/RSI/MACD dla wszystkich walorów")
+
+    st.info(
+        "Po kliknięciu przycisku system pobierze dane z yfinance dla wszystkich aktywów "
+        "w mapie aktywa_do_handlu, uruchomi prosty backtest i pokaże zbiorcze wyniki."
+    )
+
+    if st.button("🚀 Uruchom backtest dla wszystkich walorów", type="primary"):
+        wyniki = []
+        for nazwa, info in aktywa_do_handlu.items():
+            symbol = info["yf"]
+            st.write(f"➡️ Backtest dla: {nazwa} ({symbol})...")
+            try:
+                df_bt = download_data(symbol, period="2y", interval="1d")
+                res = run_backtest(df_bt)
+
+                wyniki.append({
+                    "Aktywo": nazwa,
+                    "Ticker": symbol,
+                    "End Equity": res["end_equity"],
+                    "Total PnL": res["total_pnl"],
+                    "Trades": res["num_trades"],
+                    "WinRate%": res["win_rate"],
+                    "Sharpe": res["sharpe"],
+                    "MaxDrawdown%": res["max_drawdown_pct"],
+                })
+            except Exception as e:
+                wyniki.append({
+                    "Aktywo": nazwa,
+                    "Ticker": symbol,
+                    "End Equity": None,
+                    "Total PnL": None,
+                    "Trades": None,
+                    "WinRate%": None,
+                    "Sharpe": None,
+                    "MaxDrawdown%": None,
+                    "Error": str(e),
+                })
+
+        df_wyniki = pd.DataFrame(wyniki)
+        st.markdown("### 📊 Zbiorcze wyniki backtestu")
+        st.dataframe(df_wyniki, use_container_width=True)
+
+        csv_data = df_wyniki.to_csv(index=False).encode("utf-8")
+        st.download_button(
+            label="📥 Pobierz wyniki jako CSV",
+            data=csv_data,
+            file_name="backtest_all_symbols.csv",
+            mime="text/csv"
+        )            
     st.markdown("---")
     st.markdown("### 📊 Statystyki, filtry i krzywa kapitału (z bazy SQLite)")
 
