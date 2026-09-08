@@ -110,7 +110,7 @@ def dodaj_transakcje_reczna(
             exit_price,
             pnl
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             ticker.upper(),
@@ -422,8 +422,12 @@ ostatnie_sma50 = (
 ostatnie_sma200 = (
     float(df["SMA200"].iloc[-1]) if "SMA200" in df.columns and not pd.isna(df["SMA200"].iloc[-1]) else ostatnie_sma50
 )
-bb_lower = float(df["BB_Lower"].iloc[-1]) if "BB_Lower" in df.columns and not pd.isna(df["BB_Lower"].iloc[-1]) else ostatnia_cena
-bb_upper = float(df["BB_Upper"].iloc[-1]) if "BB_Upper" in df.columns and not pd.isna(df["BB_Upper"].iloc[-1]) else ostatnia_cena
+bb_lower = (
+    float(df["BB_Lower"].iloc[-1]) if "BB_Lower" in df.columns and not pd.isna(df["BB_Lower"].iloc[-1]) else ostatnia_cena
+)
+bb_upper = (
+    float(df["BB_Upper"].iloc[-1]) if "BB_Upper" in df.columns and not pd.isna(df["BB_Upper"].iloc[-1]) else ostatnia_cena
+)
 obv = float(df["OBV"].iloc[-1]) if "OBV" in df.columns and not pd.isna(df["OBV"].iloc[-1]) else 0.0
 obv_sma = float(df["OBV_SMA"].iloc[-1]) if "OBV_SMA" in df.columns and not pd.isna(df["OBV_SMA"].iloc[-1]) else 0.0
 ostatni_macd = float(df["MACD"].iloc[-1]) if not pd.isna(df["MACD"].iloc[-1]) else 0.0
@@ -942,7 +946,7 @@ with tab6:
     if st.button("🚀 Uruchom backtest dla wszystkich walorów", type="primary"):
         wyniki = []
         with st.spinner("Uruchamiam backtesty..."):
-            for nazwa, dane_aktyw w popularne_aktywa.items():
+            for nazwa, dane_aktyw in popularne_aktywa.items():
                 symbol = dane_aktyw["ticker"]
                 st.write(f"➡️ Backtest dla: {nazwa} ({symbol})...")
                 try:
