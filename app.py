@@ -131,7 +131,7 @@ def dodaj_transakcje_reczna(
 
 def policz_sharpe_z_pnl(pnls: pd.Series) -> float:
     """
-    Uproszczony Sharpe: średni PnL na transakcję / odchylenie standardowe PnL (zamknięte).[web:75]
+    Uproszczony Sharpe: średni PnL na transakcję / odchylenie standardowe PnL (zamknięte).
     """
     if pnls is None or len(pnls) < 2:
         return 0.0
@@ -143,10 +143,10 @@ def policz_sharpe_z_pnl(pnls: pd.Series) -> float:
     return float(mean_pnl / std_pnl) if std_pnl > 0 else 0.0
 
 
-# --- PROSTE FUNKCJE BACKTESTU (SMA/RSI/MACD) ---
+# --- PROSTE FUNKCJE BACKTESTU (SMA50 / SMA200) ---
 def download_data(symbol: str, period: str = "5y", interval: str = "1d") -> pd.DataFrame:
     """
-    Dane z yfinance (domyślnie 5 lat, D1) + wskaźniki z modules.indicators.[web:102][web:103]
+    Dane z yfinance (domyślnie 5 lat, D1) + wskaźniki z modules.indicators.
     """
     df = yf.download(symbol, period=period, interval=interval, progress=False)
     if df is None or df.empty:
@@ -156,159 +156,122 @@ def download_data(symbol: str, period: str = "5y", interval: str = "1d") -> pd.D
     if isinstance(df.columns, pd.MultiIndex):
         df.columns = df.columns.get_level_values(0)
 
-    # Dodanie wskaźników: SMA, RSI, MACD, ATR itd.
+    # Dodanie wskaźników: SMA, RSI, MACD, ATR, Bollinger, OBV itd.
     df = indicators.dodaj_zaawansowane_wskazniki(df)
 
     # Upewniamy się, że mamy podstawowe kolumny
-    required_cols = ["Close", "SMA50", "RSI", "MACD", "MACD_Signal", "ATR"]
+    required_cols = ["Close", "SMA50", "SMA200"]
     for col in required_cols:
         if col not in df.columns:
             raise ValueError(f"Brakuje kolumny {col} w danych po dodaniu wskaźników")
 
-    # Usunięcie wierszy z brakami w kluczowych kolumnach
     df = df.dropna(subset=required_cols).copy()
     return df
 
 
-def run_backtest(
+def run_backtest_sma_crossover(
     df: pd.DataFrame,
     start_cash: float = 10000.0,
-    risk_pct: float = 0.015,
-    atr_mult: float = 2.0,
 ) -> dict:
     """
-    Prosty backtest long-only:
-      - wejście LONG gdy: Close > SMA50, RSI < 35, MACD > MACD_Signal,
-      - SL/TP oparte na ATR,
-      - wyjście przy SL/TP lub przy odwróceniu sygnału.
-
-    Debug:
-      - entry_signals: ile razy warunek wejścia (punkty_bycze >= 3) był spełniony,
-      - entries_opened: ile realnie otwarto pozycji.[web:103]
+    Prosty backtest 50/200 SMA (tzw. golden cross / death cross):
+      - Kupno (long) przy golden cross:
+        SMA50 przecina SMA200 od dołu (wcześniej <=, teraz >).
+      - Wyjście do gotówki przy death cross:
+        SMA50 przecina SMA200 od góry (wcześniej >=, teraz <).
+      - Brak shortów, zawsze tylko: long albo gotówka.[web:189][web:193]
+      - Pozycja = cały dostępny kapitał (buy & hold w okresach HOSSY wg SMA).
     """
-    equity = start_cash
+    close = df["Close"]
+    sma50 = df["SMA50"]
+    sma200 = df["SMA200"]
+
     cash = start_cash
     position_qty = 0
     entry_price = None
-    sl_price = None
-    tp_price = None
     entry_date = None
 
     equity_curve = []
     trades = []
 
-    entry_signals = 0  # ile razy warunek wejścia był spełniony
-    entries_opened = 0  # ile razy faktycznie otworzyliśmy pozycję
+    entry_signals = 0
+    entries_opened = 0
 
-    for idx, row in df.iterrows():
-        close = float(row["Close"])
-        sma50 = float(row["SMA50"])
-        rsi = float(row["RSI"])
-        macd = float(row["MACD"])
-        macd_sig = float(row["MACD_Signal"])
-        atr = float(row["ATR"])
+    for i in range(1, len(df)):
+        price_prev = close.iloc[i - 1]
+        price_now = close.iloc[i]
+        sma50_prev = sma50.iloc[i - 1]
+        sma200_prev = sma200.iloc[i - 1]
+        sma50_now = sma50.iloc[i]
+        sma200_now = sma200.iloc[i]
+        dt = df.index[i]
 
-        # aktualizacja equity przy otwartej pozycji
+        # aktualny equity (dla krzywej kapitału)
         if position_qty > 0 and entry_price is not None:
-            equity = cash + position_qty * close
-        equity_curve.append({"date": idx, "equity": equity})
+            equity = cash + position_qty * price_now
+        else:
+            equity = cash
+        equity_curve.append({"date": dt, "equity": equity})
 
-        # wyjście z pozycji
+        # sygnał wyjścia (death cross)
         if position_qty > 0:
-            exit_reason = None
-            exit_price = None
-
-            if close <= sl_price:
-                exit_reason = "SL"
-                exit_price = close
-            elif close >= tp_price:
-                exit_reason = "TP"
-                exit_price = close
-            elif (macd < macd_sig) or (close < sma50):
-                exit_reason = "SignalExit"
-                exit_price = close
-
-            if exit_reason is not None and exit_price is not None:
+            if sma50_prev >= sma200_prev and sma50_now < sma200_now:
+                exit_price = price_now
                 pnl = (exit_price - entry_price) * position_qty
                 cash += position_qty * exit_price
-                equity = cash
                 trades.append(
                     {
                         "entry_date": entry_date,
-                        "exit_date": idx,
+                        "exit_date": dt,
                         "entry_price": entry_price,
                         "exit_price": exit_price,
                         "qty": position_qty,
                         "pnl": pnl,
-                        "reason": exit_reason,
+                        "reason": "DeathCross",
                     }
                 )
                 position_qty = 0
                 entry_price = None
-                sl_price = None
-                tp_price = None
                 entry_date = None
                 continue
 
-        # wejście w pozycję
+        # sygnał wejścia (golden cross)
         if position_qty == 0:
-            punkty_bycze = 0
-            if close > sma50:
-                punkty_bycze += 1
-            if rsi < 35:
-                punkty_bycze += 1
-            if macd > macd_sig:
-                punkty_bycze += 1
+            if sma50_prev <= sma200_prev and sma50_now > sma200_now:
+                entry_signals += 1
+                # kupujemy za cały kapitał
+                qty = int(cash // price_now)
+                if qty > 0:
+                    position_qty = qty
+                    entry_price = price_now
+                    entry_date = dt
+                    cash -= qty * price_now
+                    entries_opened += 1
 
-            if punkty_bycze >= 3:
-                entry_signals += 1  # warunek wejścia spełniony (debug)
-
-                sl = close - atr * atr_mult
-                tp = close + atr * atr_mult * 2.0
-                if sl >= close:
-                    continue
-
-                ryzyko_max_kwota = equity * risk_pct
-                risk_per_share = close - sl
-                qty = int(ryzyko_max_kwota / risk_per_share) if risk_per_share > 0 else 0
-                if qty < 1:
-                    continue
-
-                koszt_pozycji = qty * close
-                if koszt_pozycji > cash:
-                    continue
-
-                position_qty = qty
-                entry_price = close
-                sl_price = sl
-                tp_price = tp
-                entry_date = idx
-
-                cash -= koszt_pozycji
-                equity = cash + position_qty * close
-                entries_opened += 1  # faktycznie otwarta pozycja
-
-    # zamknięcie pozycji na końcu danych
+    # zamknięcie pozycji na końcu danych (jeśli coś zostało)
     if position_qty > 0 and entry_price is not None:
-        last_idx = df.index[-1]
-        last_close = float(df["Close"].iloc[-1])
-        pnl = (last_close - entry_price) * position_qty
-        cash += position_qty * last_close
-        equity = cash
+        last_price = close.iloc[-1]
+        last_dt = df.index[-1]
+        pnl = (last_price - entry_price) * position_qty
+        cash += position_qty * last_price
         trades.append(
             {
                 "entry_date": entry_date,
-                "exit_date": last_idx,
+                "exit_date": last_dt,
                 "entry_price": entry_price,
-                "exit_price": last_close,
+                "exit_price": last_price,
                 "qty": position_qty,
                 "pnl": pnl,
                 "reason": "EndOfData",
             }
         )
+        equity = cash
+        equity_curve.append({"date": last_dt, "equity": equity})
+    else:
+        equity = cash
 
     trades_df = pd.DataFrame(trades)
-    equity_df = pd.DataFrame(equity_curve)
+    equity_df = pd.DataFrame(equity_curve).drop_duplicates(subset=["date"])
 
     total_pnl = trades_df["pnl"].sum() if not trades_df.empty else 0.0
     num_trades = len(trades_df)
@@ -323,21 +286,26 @@ def run_backtest(
     else:
         sharpe = 0.0
 
-    equity_series = equity_df["equity"]
-    running_max = equity_series.cummax()
-    drawdown = (equity_series - running_max) / running_max
-    max_dd = float(drawdown.min()) if len(drawdown) > 0 else 0.0
+    if not equity_df.empty:
+        equity_series = equity_df["equity"]
+        running_max = equity_series.cummax()
+        drawdown = (equity_series - running_max) / running_max
+        max_dd = float(drawdown.min()) * 100.0
+        end_equity = float(equity_series.iloc[-1])
+    else:
+        max_dd = 0.0
+        end_equity = start_cash
 
     result = {
         "start_cash": start_cash,
-        "end_equity": float(equity_df["equity"].iloc[-1]) if not equity_df.empty else start_cash,
+        "end_equity": end_equity,
         "total_pnl": float(total_pnl),
         "num_trades": int(num_trades),
         "wins": int(wins),
         "losses": int(losses),
         "win_rate": float(win_rate),
         "sharpe": float(sharpe),
-        "max_drawdown_pct": max_dd * 100.0,
+        "max_drawdown_pct": max_dd,
         "entry_signals": int(entry_signals),
         "entries_opened": int(entries_opened),
         "trades_df": trades_df,
@@ -427,7 +395,7 @@ if df is None or df.empty:
 ostatnia_cena = float(df["Close"].iloc[-1])
 poprzednia_cena = float(df["Close"].iloc[-2])
 zmiana_proc = ((ostatnia_cena - poprzednia_cena) / poprzednia_cena) * 100
-ostatni_rsi = float(df["RSI"].iloc[-1]) if not pd.isna(df["RSI"].iloc[-1]) else 50.0
+ostatni_rsi = float(df["RSI"].iloc[-1]) if "RSI" in df.columns and not pd.isna(df["RSI"].iloc[-1]) else 50.0
 ostatnie_sma50 = (
     float(df["SMA50"].iloc[-1]) if "SMA50" in df.columns and not pd.isna(df["SMA50"].iloc[-1]) else ostatnia_cena
 )
@@ -442,9 +410,11 @@ bb_upper = (
 )
 obv = float(df["OBV"].iloc[-1]) if "OBV" in df.columns and not pd.isna(df["OBV"].iloc[-1]) else 0.0
 obv_sma = float(df["OBV_SMA"].iloc[-1]) if "OBV_SMA" in df.columns and not pd.isna(df["OBV_SMA"].iloc[-1]) else 0.0
-ostatni_macd = float(df["MACD"].iloc[-1]) if not pd.isna(df["MACD"].iloc[-1]) else 0.0
-ostatni_macd_sig = float(df["MACD_Signal"].iloc[-1]) if not pd.isna(df["MACD_Signal"].iloc[-1]) else 0.0
-ostatni_atr = float(df["ATR"].iloc[-1]) if not pd.isna(df["ATR"].iloc[-1]) else (ostatnia_cena * 0.02)
+ostatni_macd = float(df["MACD"].iloc[-1]) if "MACD" in df.columns and not pd.isna(df["MACD"].iloc[-1]) else 0.0
+ostatni_macd_sig = (
+    float(df["MACD_Signal"].iloc[-1]) if "MACD_Signal" in df.columns and not pd.isna(df["MACD_Signal"].iloc[-1]) else 0.0
+)
+ostatni_atr = float(df["ATR"].iloc[-1]) if "ATR" in df.columns and not pd.isna(df["ATR"].iloc[-1]) else (ostatnia_cena * 0.02)
 
 # --- NEWSY / SENTYMENT ---
 @st.cache_data(ttl=300)
@@ -603,7 +573,7 @@ tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(
         "⚖️ Kalkulator Pozycji & ATR",
         "🔍 Skaner Rynku (GPW & USA)",
         "📓 Dziennik Transakcji (SQLite)",
-        "🔁 Backtest strategii",
+        "🔁 Backtest SMA50/200",
     ]
 )
 
@@ -782,9 +752,9 @@ with tab4:
                 d_skan = pobierz_dane(sym, "3mo", "1d")
                 if d_skan is not None and not d_skan.empty:
                     cena = float(d_skan["Close"].iloc[-1])
-                    rsi_val = float(d_skan["RSI"].iloc[-1]) if not pd.isna(d_skan["RSI"].iloc[-1]) else 50.0
-                    sma50_val = float(d_skan["SMA50"].iloc[-1]) if not pd.isna(d_skan["SMA50"].iloc[-1]) else cena
-                    atr_val = float(d_skan["ATR"].iloc[-1]) if not pd.isna(d_skan["ATR"].iloc[-1]) else 0.0
+                    rsi_val = float(d_skan["RSI"].iloc[-1]) if "RSI" in d_skan.columns and not pd.isna(d_skan["RSI"].iloc[-1]) else 50.0
+                    sma50_val = float(d_skan["SMA50"].iloc[-1]) if "SMA50" in d_skan.columns and not pd.isna(d_skan["SMA50"].iloc[-1]) else cena
+                    atr_val = float(d_skan["ATR"].iloc[-1]) if "ATR" in d_skan.columns and not pd.isna(d_skan["ATR"].iloc[-1]) else 0.0
                     trend = "🟢 Wzrostowy" if cena > sma50_val else "🔴 Spadkowy"
 
                     if rsi_val < 35:
@@ -947,12 +917,12 @@ with tab5:
         st.info("Baza `transakcje` jest obecnie pusta – brak danych do wyświetlenia.")
 
 with tab6:
-    st.subheader("🔁 Backtest strategii SMA/RSI/MACD dla wszystkich popularnych aktywów")
+    st.subheader("🔁 Backtest strategii SMA50/SMA200 (golden/death cross)")
 
     st.info(
-        "Po kliknięciu przycisku system pobierze dane z yfinance (5 lat, D1) dla wszystkich aktywów "
-        "w liście popularne_aktywa, uruchomi prosty backtest strategii SMA/RSI/MACD "
-        "i pokaże zbiorcze wyniki oraz liczbę sygnałów wejścia."
+        "Strategia: kupno przy golden cross (SMA50 przecina SMA200 od dołu), "
+        "wyjście do gotówki przy death cross (SMA50 przecina SMA200 od góry). "
+        "Brak shortów – tylko long lub cash.[web:189][web:193]"
     )
 
     if st.button("🚀 Uruchom backtest dla wszystkich walorów", type="primary"):
@@ -963,7 +933,7 @@ with tab6:
                 st.write(f"➡️ Backtest dla: {nazwa} ({symbol})...")
                 try:
                     df_bt = download_data(symbol, period="5y", interval="1d")
-                    res = run_backtest(df_bt)
+                    res = run_backtest_sma_crossover(df_bt)
 
                     wyniki.append(
                         {
@@ -997,13 +967,13 @@ with tab6:
                     )
 
         df_wyniki = pd.DataFrame(wyniki)
-        st.markdown("### 📊 Zbiorcze wyniki backtestu (z debugiem)")
+        st.markdown("### 📊 Zbiorcze wyniki backtestu SMA50/200")
         st.dataframe(df_wyniki, use_container_width=True)
 
         csv_data = df_wyniki.to_csv(index=False).encode("utf-8")
         st.download_button(
             label="📥 Pobierz wyniki jako CSV",
             data=csv_data,
-            file_name="backtest_all_symbols_debug.csv",
+            file_name="backtest_sma50_200_all_symbols.csv",
             mime="text/csv",
         )
