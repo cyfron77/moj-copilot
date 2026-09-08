@@ -361,12 +361,13 @@ else:
     st.info(komunikat_werdyktu)
 
 # --- ZAKŁADKI GŁÓWNE ---
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📈 Wykres (Wstęgi + SMA200 + MACD)", 
     "🤖 Analiza Sentymentu (AI)", 
     "⚖️ Kalkulator Pozycji & ATR",
     "🔍 Skaner Rynku (GPW & USA)",
-    "📓 Dziennik Transakcji (SQLite)"
+    "📓 Dziennik Transakcji (SQLite)",
+    "🔁 Backtest strategii"
 ])
 
 with tab1:
