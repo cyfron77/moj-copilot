@@ -5,6 +5,7 @@ from plotly.subplots import make_subplots
 import pandas as pd
 import numpy as np
 import feedparser
+from bot_trading_demo import aktywa_do_handlu
 from textblob import TextBlob
 from datetime import datetime
 import sqlite3
